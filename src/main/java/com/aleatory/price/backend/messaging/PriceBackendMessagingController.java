@@ -99,6 +99,7 @@ public class PriceBackendMessagingController {
 		if (wireCondor == null) {
 			return;
 		}
+		logger.info("Sending full condor: {}", wireCondor.toString());
 		messagingOperations.publishMessage("/topic/prices.current.condor.full", wireCondor);
 	}
 

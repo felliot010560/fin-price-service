@@ -8,6 +8,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.fattails.domain.Option;
 import org.fattails.domain.Price;
@@ -64,7 +65,7 @@ public class CondorProvider {
     private Map<String, Integer> condorToTicker = Collections.synchronizedMap( new HashMap<>() );
     private Map<Integer, IronCondor<?>> tickersToCondor = Collections.synchronizedMap( new HashMap<>() );
 
-    int condorTickerId = -1;
+    private AtomicInteger condorTickerId = new AtomicInteger(-1);
     
     @EventListener(ConnectionUsableEvent.class)
     private void getSPXInformation() {
@@ -72,10 +73,10 @@ public class CondorProvider {
     }
 
     public synchronized WirePrice getCondorWirePrice() {
-        if (condorTickerId < 0) {
+        if (condorTickerId.get() < 0) {
             return new WirePrice(null);
         }
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId);
+        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
         if( condor == null ) {
         	return new WirePrice(null);
         }
@@ -85,10 +86,10 @@ public class CondorProvider {
     }
     
     public synchronized Price getCondorPrice() {
-        if (condorTickerId < 0) {
+        if (condorTickerId.get() < 0) {
             return null;
         }
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId);
+        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
         if( condor == null ) {
         	return null;
         }
@@ -119,6 +120,10 @@ public class CondorProvider {
                 return;
             }
             subscribeToCondor();
+        } else {
+        	//Send out the existing condor even if it doesn't change
+        	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
+        	applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
         }
     }
 
@@ -148,7 +153,7 @@ public class CondorProvider {
 
         // Don't send bullshit prices
         if (bid != 0.0 && ask != 0.0 && !( bid >= ask )) {
-            if( condorTickerId == event.getTickerId() ) {
+            if( condorTickerId.get() == event.getTickerId() ) {
             	applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice));
             }
         }
@@ -181,7 +186,7 @@ public class CondorProvider {
     // the last condor was invalid (missing an option in the option chain) and then we look for a good one
     private boolean subscribeToCondor() {
     	//We don't calculate new condors if we're actively trading (unless we don't have a condor at all yet)
-    	if( TradingDays.inActiveTradingTime() && condorTickerId >= 0 ) {
+    	if( TradingDays.inActiveTradingTime() && condorTickerId.get() >= 0 ) {
     		logger.debug("Keeping old condor--in active trading hours.");
     		return false;
     	}
@@ -243,9 +248,9 @@ public class CondorProvider {
     private synchronized void requestCondorMarketData(IronCondor<? extends Option> condor) {
     	if( condorToTicker.containsKey(condor.toString()) ) {
     		logger.info("Already subscribed to market data for condor {}", condor);
-    		condorTickerId = condorToTicker.get(condor.toString());
+    		condorTickerId.set( condorToTicker.get(condor.toString()) );
     		//Update the timestamp, remove the old timestamp, and reinsert the new one into the priority queue
-    		TickerTimestamp timestamp = tickersToTimestamps.get(condorTickerId);
+    		TickerTimestamp timestamp = tickersToTimestamps.get(condorTickerId.get());
     		if( timestamp != null ) {
     			timestamp.timestamp = LocalDateTime.now();
     			tickerAges.remove(timestamp);
@@ -262,13 +267,13 @@ public class CondorProvider {
         //Get a snapshot in case the condor doesn't tick
         client.requestMarketData(0, condor, true);
         //Then subscribe (and cancel the previous condor ticker)
-        condorTickerId = client.requestMarketData(condorTickerId, condor, false);
+        condorTickerId.set( client.requestMarketData(condorTickerId.get(), condor, false) );
         //Index the new ticker id.
-        condorToTicker.put(condor.toString(), condorTickerId);
-        tickersToCondor.put(condorTickerId, condor);
-        TickerTimestamp timestamp = new TickerTimestamp(condorTickerId, LocalDateTime.now() );
+        condorToTicker.put(condor.toString(), condorTickerId.get());
+        tickersToCondor.put(condorTickerId.get(), condor);
+        TickerTimestamp timestamp = new TickerTimestamp(condorTickerId.get(), LocalDateTime.now() );
         tickerAges.add(timestamp);
-        tickersToTimestamps.put(condorTickerId, timestamp);
+        tickersToTimestamps.put(condorTickerId.get(), timestamp);
         
         //Only keep the most recent tickers (no more than MAX_NUMBER_OF_TICKERS)
         if( tickersToCondor.size() > MAX_NUMBER_OF_TICKERS ) {
@@ -281,7 +286,7 @@ public class CondorProvider {
         			tt.tickerId, condorToRemove, tt.timestamp, tickerAges.size(), tickersToCondor.size(), condorToTicker.size());	
         }
         
-        logger.info("Added ticker {} for condor {}\nThere are now {} tickers.", condorTickerId, condor, tickersToCondor.size());
+        logger.info("Added ticker {} for condor {}\nThere are now {} tickers.", condorTickerId.get(), condor, tickersToCondor.size());
         
     }
     
@@ -296,7 +301,7 @@ public class CondorProvider {
     }
 
     public synchronized WireCondor getCurrentCondor() {
-    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId);
+    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
         if (condor == null) {
             return null;
         }
@@ -305,12 +310,12 @@ public class CondorProvider {
     }
     
     public IronCondor<?> getCondor() {
-    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId);
+    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
         return condor;
     }
 
     public synchronized WireFullCondor getCurrentFullCondor() {
-    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId);
+    	IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
         if (condor == null) {
             return null;
         }
