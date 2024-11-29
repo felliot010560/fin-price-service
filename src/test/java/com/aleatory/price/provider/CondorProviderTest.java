@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ import com.aleatory.price.events.NewCondorPriceEvent;
 class CondorProviderTest {
 	
 	private CondorProvider cut;
-	private static final int TICKER_ID = 5;
+	private static final AtomicInteger TICKER_ID = new AtomicInteger(5);
 	private static final int BID = 1;
 	private static final int ASK = 2;
 	private static final double BID_VALUE = -3.2;
@@ -47,7 +48,7 @@ class CondorProviderTest {
 		cut = new CondorProvider();
 		tickersToCondor = new HashMap<>();
 		condor = new IBIronCondor();
-		tickersToCondor.put(TICKER_ID, condor);
+		tickersToCondor.put(TICKER_ID.get(), condor);
 		
 		ReflectionTestUtils.setField(cut, "tickersToCondor", tickersToCondor);
 		ReflectionTestUtils.setField(cut, "condorTickerId", TICKER_ID);
@@ -56,8 +57,8 @@ class CondorProviderTest {
 
 	@Test
 	void handleCondorTickHappyPathTest() {
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, BID_VALUE);
-		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID, ASK, ASK_VALUE);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, BID_VALUE);
+		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, ASK_VALUE);
 		
 		cut.handleCondorTick(event1);
 		cut.handleCondorTick(event2);
@@ -69,9 +70,9 @@ class CondorProviderTest {
 	
 	@Test
 	void handleCondorTickNotMainTickerIdTest() {
-		ReflectionTestUtils.setField(cut, "condorTickerId", TICKER_ID + 1);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, BID_VALUE);
-		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID, ASK, ASK_VALUE);
+		ReflectionTestUtils.setField(cut, "condorTickerId", new AtomicInteger(6));
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, BID_VALUE);
+		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, ASK_VALUE);
 		
 		cut.handleCondorTick(event1);
 		cut.handleCondorTick(event2);
@@ -83,8 +84,8 @@ class CondorProviderTest {
 	
 	@Test
 	void handleCondorTickHappyPathWithRoundingTest() {
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, BID_VALUE - .0000000001);
-		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID, ASK, ASK_VALUE + .0000000001);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, BID_VALUE - .0000000001);
+		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, ASK_VALUE + .0000000001);
 		
 		cut.handleCondorTick(event1);
 		cut.handleCondorTick(event2);
@@ -96,7 +97,7 @@ class CondorProviderTest {
 	@Test
 	void handleCondorTickWithGarbageBidTooLowTest() {
 		condor.getPrice().setBid(BID_VALUE);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, GARBAGE_BID_TOO_LOW);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, GARBAGE_BID_TOO_LOW);
 		
 		cut.handleCondorTick(event1);
 		
@@ -107,7 +108,7 @@ class CondorProviderTest {
 	@Test
 	void handleCondorTickWithGarbageBidTooHighTest() {
 		condor.getPrice().setBid(BID_VALUE);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, GARBAGE_BID_TOO_HIGH);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, GARBAGE_BID_TOO_HIGH);
 		
 		cut.handleCondorTick(event1);
 		
@@ -118,7 +119,7 @@ class CondorProviderTest {
 	@Test
 	void handleCondorTickWithGarbageBidOf0Test() {
 		condor.getPrice().setBid(BID_VALUE);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, 0.0);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, 0.0);
 		
 		cut.handleCondorTick(event1);
 		
@@ -129,7 +130,7 @@ class CondorProviderTest {
 	@Test
 	void handleCondorTickWithGarbageAskTooHighTest() {
 		condor.getPrice().setAsk(ASK_VALUE);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, ASK, GARBAGE_ASK_TOO_HIGH);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, GARBAGE_ASK_TOO_HIGH);
 		
 		cut.handleCondorTick(event1);
 		
@@ -140,7 +141,7 @@ class CondorProviderTest {
 	@Test
 	void handleCondorTickWithGarbageAskOf0Test() {
 		condor.getPrice().setAsk(ASK_VALUE);
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, ASK, 0.0);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, 0.0);
 		
 		cut.handleCondorTick(event1);
 		
@@ -150,8 +151,8 @@ class CondorProviderTest {
 	
 	@Test
 	void handleCondorTickWithBidHigherThanAskTest() {
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, -1.0);
-		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID, ASK, -2.0);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, -1.0);
+		TickReceivedEvent event2 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, -2.0);
 		
 		cut.handleCondorTick(event1);
 		cut.handleCondorTick(event2);
@@ -163,7 +164,7 @@ class CondorProviderTest {
 	
 	@Test
 	void handleCondorTickWith0AskDoesntSend() {
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, BID, BID_VALUE);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), BID, BID_VALUE);
 		
 		cut.handleCondorTick(event1);
 		
@@ -174,7 +175,7 @@ class CondorProviderTest {
 	
 	@Test
 	void handleCondorTickWith0BidDoesntSend() {
-		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID, ASK, ASK_VALUE);
+		TickReceivedEvent event1 = new TickReceivedEvent(this, TICKER_ID.get(), ASK, ASK_VALUE);
 		
 		cut.handleCondorTick(event1);
 		

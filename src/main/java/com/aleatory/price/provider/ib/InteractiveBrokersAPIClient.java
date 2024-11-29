@@ -65,7 +65,7 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
 
     @EventListener
     private void onConnectionUsable(ConnectionUsableEvent event) {
-        client.reqMarketDataType(2);
+        client.reqMarketDataType(3);
     }
 
     public void unsubscribeSPXQuoteData() {
