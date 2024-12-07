@@ -18,7 +18,6 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
 import com.aleatory.common.domain.IronCondor;
-import com.aleatory.common.domain.WireClose;
 import com.aleatory.common.domain.WireCondor;
 import com.aleatory.common.domain.WireFullCondor;
 import com.aleatory.common.domain.WirePrice;
@@ -28,7 +27,6 @@ import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
 import com.aleatory.price.events.NewSPXPriceEvent;
-import com.aleatory.price.events.SPXCloseReceivedEvent;
 import com.aleatory.price.provider.CondorProvider;
 import com.aleatory.price.provider.SPXPriceProvider;
 
@@ -133,17 +131,4 @@ public class PriceBackendMessagingController {
 		lastPriceSent.set(System.currentTimeMillis());
 	}
 
-	@EventListener
-	private void sendSPXClose(SPXCloseReceivedEvent event) {
-		//Do NOT send a close without a price.
-		if( spxPriceProvider.getSPXPrice().getLast() == 0.0) {
-			return;
-		}
-		WireClose wireClose = new WireClose();
-		wireClose.setSymbol("SPX");
-		wireClose.setForDay(event.getForDate());
-		wireClose.setClose(event.getPrice());
-		logger.info("Sending SPX close of {} for day {}", wireClose.getClose(), wireClose.getForDay());
-		messagingOperations.publishMessage("/topic/prices.spx.close", wireClose);
-	}
 }

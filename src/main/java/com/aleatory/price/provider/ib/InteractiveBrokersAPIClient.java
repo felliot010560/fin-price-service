@@ -1,7 +1,6 @@
 package com.aleatory.price.provider.ib;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -32,11 +31,9 @@ import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.provider.IdProvider;
 import com.aleatory.common.provider.ib.AbstractIBListener;
 import com.aleatory.common.provider.ib.IBUtils;
-import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.AllExpirationsAndStrikesReceivedEvent;
 import com.aleatory.price.events.OptionImpVolAvailableEvent;
 import com.aleatory.price.events.ReceivedExpirationsAndStrikeEvent;
-import com.aleatory.price.events.SPXCloseReceivedEvent;
 import com.aleatory.price.provider.PricingAPIClient;
 import com.ib.client.Bar;
 import com.ib.client.Contract;
@@ -187,17 +184,6 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
 
     @Override
     public void historicalData(int reqId, Bar bar) {
-        if (client == null || !client.isConnected()) {
-            return;
-        }
-        logger.info("Got close for SPX of {} for time {}.", bar.close(), bar.time());
-        String dateString = bar.time().substring(0, 4) + "-" + bar.time().substring(4, 6) + "-" + bar.time().substring(6);
-        LocalDate closeDate = LocalDate.parse(dateString);
-
-        LocalDateTime closingTime = LocalDateTime.of(LocalDate.now(), TradingDays.getClosingTime());
-        if (closeDate.isBefore(LocalDate.now()) || (closeDate.equals(LocalDate.now()) && LocalDateTime.now().isAfter(closingTime))) {
-            applicationEventPublisher.publishEvent(new SPXCloseReceivedEvent(this, bar.close(), closeDate, false));
-        }
     }
 
     @Override
