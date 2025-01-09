@@ -21,6 +21,7 @@ public interface PricingAPIClient {
     int startImpliedVolCalculation(Option option, double priceForCalc, double underlyingPrice);
     Option getEmptyVendorSpecificOption();
     Stock getEmptyVendorSpecificStock();
+    void checkConnectionAlive();
     /**
      * Builds an iron condor specific to the trading system ({@link IBIronCondor} for IBKR, e.g.)
      * @param longCall

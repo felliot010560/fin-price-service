@@ -37,6 +37,7 @@ import com.aleatory.price.events.OptionChainCompleteEvent;
 @Component
 public class CondorProvider {
     private static final Logger logger = LoggerFactory.getLogger(CondorProvider.class);
+    private static Logger ticksLogger = LoggerFactory.getLogger("CONDORTICKSLOGGER");
     private static final double MINIMUM_VALID_BID = -10.0;
 
     @Autowired
@@ -134,6 +135,7 @@ public class CondorProvider {
         if( condor == null ) {
         	return;
         }
+        ticksLogger.info("{}, {}, {}", event.getTickerId(), event.getPriceType(), event.getPrice());
     	//Throw out garbage prices (bid < -10.0 or >= 0.0, ask >= 0.0)
     	if( event.getPrice() >= 0.0 || ( event.getPriceType() == PriceType.BID && event.getPrice() < MINIMUM_VALID_BID ) ) {
     		return;
@@ -155,6 +157,7 @@ public class CondorProvider {
         if (bid != 0.0 && ask != 0.0 && !( bid >= ask )) {
             if( condorTickerId.get() == event.getTickerId() ) {
             	applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice));
+            	ticksLogger.info("Sent: {}, {}, {}", event.getTickerId(), event.getPriceType(), event.getPrice());
             }
         }
     }
@@ -249,6 +252,7 @@ public class CondorProvider {
     	if( condorToTicker.containsKey(condor.toString()) ) {
     		logger.info("Already subscribed to market data for condor {}", condor);
     		condorTickerId.set( condorToTicker.get(condor.toString()) );
+    		ticksLogger.info("Current ticker (old): {}", condorTickerId.get());
     		//Update the timestamp, remove the old timestamp, and reinsert the new one into the priority queue
     		TickerTimestamp timestamp = tickersToTimestamps.get(condorTickerId.get());
     		if( timestamp != null ) {
@@ -268,6 +272,7 @@ public class CondorProvider {
         client.requestMarketData(0, condor, true);
         //Then subscribe (and cancel the previous condor ticker)
         condorTickerId.set( client.requestMarketData(condorTickerId.get(), condor, false) );
+        ticksLogger.info("Current ticker (new): {}", condorTickerId.get());
         //Index the new ticker id.
         condorToTicker.put(condor.toString(), condorTickerId.get());
         tickersToCondor.put(condorTickerId.get(), condor);

@@ -27,7 +27,7 @@ import com.aleatory.price.events.SPXExternalTickReceivedEvent;
 public class SPXPriceProvider {
     private static final Logger logger = LoggerFactory.getLogger(SPXPriceProvider.class);
     private static Logger spxLogger = LoggerFactory.getLogger("SPXLOGGER");
-
+    
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
 

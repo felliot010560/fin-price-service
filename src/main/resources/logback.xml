@@ -22,13 +22,29 @@
         </encoder>
     </appender>
     
+    <appender name="CONDORTICKS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/${environment:-prod}/condor-ticks.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+          <!-- daily rollover -->
+          <fileNamePattern>logs/condor-ticks.%d{yyyy-MM-dd}.log</fileNamePattern>
+    
+          <!-- keep 7 days' worth of history capped at 2GB total size -->
+          <maxHistory>3</maxHistory>
+          <totalSizeCap>2GB</totalSizeCap>
+    
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/${environment:-prod}/pricing.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
           <!-- daily rollover -->
           <fileNamePattern>logs/${environment:-prod}/pricing.%d{yyyy-MM-dd}.log</fileNamePattern>
     
-          <!-- keep 7 days' worth of history capped at 1.4GB total size -->
+          <!-- keep 7 days' worth of history capped at 2GB total size -->
           <maxHistory>7</maxHistory>
           <totalSizeCap>2GB</totalSizeCap>
     
@@ -40,6 +56,10 @@
     
     <logger name="SPXLOGGER" additivity="false" level="DEBUG">
         <appender-ref ref="SPXFILE" />
+    </logger>
+    
+    <logger name="CONDORTICKSLOGGER" additivity="false" level="DEBUG">
+        <appender-ref ref="CONDORTICKS" />
     </logger>
     
 

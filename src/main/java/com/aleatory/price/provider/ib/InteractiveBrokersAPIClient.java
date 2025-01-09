@@ -70,12 +70,10 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
     }
 
     /**
-     * Called when a connection is successfully completed. Shouldn't start reader
-     * until now.
+     * Called when a connection is successfully completed.
      */
-    @Override
-    public void nextValidId(int orderId) {
-        super.nextValidId(orderId);
+    @EventListener(ConnectionUsableEvent.class)
+    private void connectionUsable() {
         tickerIds.clear();
     }
 
@@ -138,8 +136,7 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
                 }
                 logger.error("Lowest invalid ticker id = {}", lowestInvalidTickerId);
             }
-            if (errorCode == 1101)
-                logger.error("Got error from TWS API: id: {}, errorCode: {}, errorMsg: {}, advancedOrderRejectJson: {}", id, errorCode, errorMsg, advancedOrderRejectJson);
+            logger.error("Got error from TWS API: id: {}, errorCode: {}, errorMsg: {}, advancedOrderRejectJson: {}", id, errorCode, errorMsg, advancedOrderRejectJson);
         }
     }
 
@@ -300,5 +297,13 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
     public IronCondor<?> buildIronCondor(Option longCall, Option shortCall, Option shortPut, Option longPut, short quantity) {
         return new IBIronCondor((IBOption) longCall, (IBOption) shortCall, (IBOption) shortPut, (IBOption) longPut, quantity);
     }
+
+	@Override
+	public void checkConnectionAlive() {
+		if( client == null ) {
+			return;
+		}
+		client.reqIds(-1);
+	}
 
 }
