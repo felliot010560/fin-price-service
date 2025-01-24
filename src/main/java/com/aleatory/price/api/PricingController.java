@@ -5,11 +5,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.aleatory.common.domain.WireCondor;
 import com.aleatory.common.domain.WirePrice;
+import com.aleatory.price.IBPricingServiceApplication;
 import com.aleatory.price.services.PricingService;
 
 @RestController
@@ -41,6 +43,13 @@ public class PricingController {
     public WirePrice getSPXPrice() {
         logger.info("Getting SPX price.");
         return pricingService.getSPXPrice();
+    }
+    
+    @PostMapping("/restart")
+    @CrossOrigin(origins = { "http://localhost:3000", "http://192.168.68.51:3030" }, allowCredentials = "true")
+    @ResponseBody
+    public void restart() {
+        IBPricingServiceApplication.restart(IBPricingServiceApplication.class);
     }
 
 }
