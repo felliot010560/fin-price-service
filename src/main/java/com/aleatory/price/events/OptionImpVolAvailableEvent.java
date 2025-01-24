@@ -8,9 +8,9 @@ public class OptionImpVolAvailableEvent extends ApplicationEvent {
     private int tickerId;
 
     public OptionImpVolAvailableEvent(Object source, int tickerId, double impVol) {
-	super(source);
-	this.tickerId = tickerId;
-	this.impVol = impVol;
+        super(source);
+        this.tickerId = tickerId;
+        this.impVol = impVol;
     }
 
     public double getImpVol() {

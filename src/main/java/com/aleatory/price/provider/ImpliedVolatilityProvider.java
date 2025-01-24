@@ -36,65 +36,65 @@ import com.aleatory.price.events.OptionGroupImpVolComplete;
 @Component
 public class ImpliedVolatilityProvider {
     private static final Logger logger = LoggerFactory.getLogger(ImpliedVolatilityProvider.class);
-    
+
     @Autowired
     @Qualifier("apiScheduler")
     private TaskScheduler scheduler;
-    
+
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
-    
+
     @Autowired
     private IdProvider idProvider;
-    
+
     @Autowired
     private OptionChainPriceProvider optionChainProvider;
-    
+
     @Autowired
     private SPXPriceProvider spxPriceProvider;
-    
+
     private Date expDate;
-    
+
     private Map<String, Option> optionChain;
     private long lastImpVolCalc = 0;
     private double impVol;
-    
-    
+
     @EventListener
     private void optionChainComplete(OptionChainCompleteEvent event) {
         this.optionChain = event.getOptionChain();
         this.expDate = event.getExpDate();
-        
-        if( optionChain.size() == 0 ) {
+
+        if (optionChain.size() == 0) {
             LocalDate expiration = expDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
             boolean isTradingDay = TradingDays.dayIsTradingDay(expiration);
-            logger.info("No options in chain. (Expiration {} {} a trading day.)", expiration, isTradingDay ? "is" : "is not" );
+            logger.info("No options in chain. (Expiration {} {} a trading day.)", expiration, isTradingDay ? "is" : "is not");
             return;
         }
         logger.info("Got option chain complete, calculating imp vol");
-        
+
         scheduleImpliedVolCalc();
 
         lastImpVolCalc = System.currentTimeMillis();
     }
-    
+
     private ScheduledFuture<?> impliedVolCalcTask;
+
     private void scheduleImpliedVolCalc() {
-        if( impliedVolCalcTask != null ) {
+        if (impliedVolCalcTask != null) {
             impliedVolCalcTask.cancel(false);
         }
         Duration calcDuration = Duration.of(10, ChronoUnit.SECONDS);
         logger.info("Scheduling implied vol calcs at {} to run every {}", ZonedDateTime.now(), calcDuration);
-        
+
         impliedVolCalcTask = scheduler.scheduleAtFixedRate(() -> {
-            if( TradingDays.inIndexTradingHours() || TradingDays.inTradingHours() ) {
+            if (TradingDays.inIndexTradingHours() || TradingDays.inTradingHours()) {
                 logger.info("Calculating implied volatility, last was {} ms ago.", lastImpVolCalc == 0 ? 0 : System.currentTimeMillis() - lastImpVolCalc);
                 startImpliedVolatilityCalculation();
                 lastImpVolCalc = System.currentTimeMillis();
             }
         }, calcDuration);
     }
-    
+
     @EventListener(ConnectionUsableEvent.class)
     private void initOptionChain() {
         optionChain = null;
@@ -107,14 +107,13 @@ public class ImpliedVolatilityProvider {
             calculateImpVolIfAllOptionPricesPresent();
         }
     }
-    
 
     private int groupIdForLastCalc;
-    
+
     // request implied vol for each ATM option
     private void startImpliedVolatilityCalculation() {
-        //Check for option chain not yet initialized.
-        if( optionChain == null) {
+        // Check for option chain not yet initialized.
+        if (optionChain == null) {
             return;
         }
         List<Option> optionsToGetQuotesFor = getNOptionStrikesAboveAndNBelow(spxPriceProvider.getSPXLast(), 5);
@@ -172,7 +171,6 @@ public class ImpliedVolatilityProvider {
         }
         return aboveOrBelowOptions;
     }
-
 
     private double calculateImpliedVol() {
         impVol = Double.NaN;

@@ -9,22 +9,25 @@ public class SPXExternalTickReceivedEvent extends ApplicationEvent {
 
     private PriceType ticktype;
     private Double value;
-    
+
     public SPXExternalTickReceivedEvent(Object source, PriceType ticktype, Double value) {
-	super(source);
-	this.ticktype = ticktype;
-	this.value = value;
+        super(source);
+        this.ticktype = ticktype;
+        this.value = value;
     }
-    
+
     public PriceType getTicktype() {
         return ticktype;
     }
+
     public void setTicktype(PriceType ticktype) {
         this.ticktype = ticktype;
     }
+
     public Double getValue() {
         return value;
     }
+
     public void setValue(Double value) {
         this.value = value;
     }

@@ -12,40 +12,44 @@ import com.aleatory.price.provider.SPXPriceProvider;
 
 @Component
 public class PricingService {
-    
+
     @Autowired
     PricingAPIClient client;
-    
+
     @Autowired
     SPXPriceProvider spxPriceProvider;
-    
+
     @Autowired
     CondorProvider condorProvider;
-    
-    @Autowired ImpliedVolatilityProvider impliedVolatilityProvider;
+
+    @Autowired
+    ImpliedVolatilityProvider impliedVolatilityProvider;
 
     public WirePrice getSPXPrice() {
-	return spxPriceProvider.getSPXPrice();
+        return spxPriceProvider.getSPXPrice();
     }
-    
+
     public Double getSPXImpliedVol() {
-	return impliedVolatilityProvider.getImpliedVolatility();
+        return impliedVolatilityProvider.getImpliedVolatility();
     }
-    
+
     /**
-     * The {@link WireCondor} class has the condor strikes in the order: <upper band long call>, <upper band short call>, <lower band short put>, <lower band long put>
+     * The {@link WireCondor} class has the condor strikes in the order: <upper band
+     * long call>, <upper band short call>, <lower band short put>, <lower band long
+     * put>
+     * 
      * @return the list of condor strikes in the order specified
      */
     public WireCondor getCondor() {
-	return condorProvider.getCurrentCondor();
+        return condorProvider.getCurrentCondor();
     }
-    
+
     public WirePrice getCondorPrice() {
-	return condorProvider.getCondorWirePrice();
+        return condorProvider.getCondorWirePrice();
     }
 
     public Double getSPXChange() {
-	return spxPriceProvider.getSPXChange();
+        return spxPriceProvider.getSPXChange();
     }
 
 }

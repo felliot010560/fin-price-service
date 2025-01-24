@@ -11,20 +11,21 @@ public final class UnsafeX509ExtendedTrustManager extends X509ExtendedTrustManag
     private static final X509ExtendedTrustManager INSTANCE = new UnsafeX509ExtendedTrustManager();
     private static final X509Certificate[] EMPTY_CERTIFICATES = new X509Certificate[0];
 
-    private UnsafeX509ExtendedTrustManager() {}
+    private UnsafeX509ExtendedTrustManager() {
+    }
 
     public static X509ExtendedTrustManager getInstance() {
         return INSTANCE;
     }
 
     @Override
-    public void checkClientTrusted(X509Certificate[] certificates, String authType) { 
+    public void checkClientTrusted(X509Certificate[] certificates, String authType) {
 
     }
 
     @Override
     public void checkClientTrusted(X509Certificate[] certificates, String authType, Socket socket) {
-    
+
     }
 
     @Override
@@ -53,4 +54,3 @@ public final class UnsafeX509ExtendedTrustManager extends X509ExtendedTrustManag
     }
 
 }
-

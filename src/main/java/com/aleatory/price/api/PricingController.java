@@ -15,32 +15,32 @@ import com.aleatory.price.services.PricingService;
 @RestController
 public class PricingController {
     private static final Logger logger = LoggerFactory.getLogger(PricingController.class);
-    
+
     @Autowired
     private PricingService pricingService;
 
     @GetMapping("/condor")
     @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
-    @ResponseBody    
+    @ResponseBody
     public WireCondor getCondorStrikes() {
-	logger.info("Getting condor.");
-	return pricingService.getCondor();
+        logger.info("Getting condor.");
+        return pricingService.getCondor();
     }
-    
+
     @GetMapping("/condor-price")
     @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
-    @ResponseBody    
+    @ResponseBody
     public WirePrice getCondorPrice() {
-	logger.info("Getting condor price.");
-	return pricingService.getCondorPrice();
+        logger.info("Getting condor price.");
+        return pricingService.getCondorPrice();
     }
-    
+
     @GetMapping("/spx-price")
     @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
-    @ResponseBody    
+    @ResponseBody
     public WirePrice getSPXPrice() {
-	logger.info("Getting SPX price.");
-	return pricingService.getSPXPrice();
+        logger.info("Getting SPX price.");
+        return pricingService.getSPXPrice();
     }
 
 }

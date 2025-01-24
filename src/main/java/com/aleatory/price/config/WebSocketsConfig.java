@@ -15,16 +15,16 @@ public class WebSocketsConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
-	config.enableSimpleBroker("/topic");
+        config.enableSimpleBroker("/topic");
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-	registry.addEndpoint("/pricing").setAllowedOrigins("*");
+        registry.addEndpoint("/pricing").setAllowedOrigins("*");
     }
-    
+
     @Override
     public void configureWebSocketTransport(WebSocketTransportRegistration registry) {
-	registry.setSendBufferSizeLimit(1024 * 1024);
+        registry.setSendBufferSizeLimit(1024 * 1024);
     }
 }

@@ -13,19 +13,19 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @Configuration
 @EnableAsync
 public class PriceServiceAsyncConfig implements AsyncConfigurer {
-    
+
     @Bean
     public Executor condorsExecutor() {
-	ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-	executor.setCorePoolSize(10);
-	return executor;
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        return executor;
     }
 
     @Bean
     public TaskScheduler pricesScheduler() {
-	ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-	scheduler.setPoolSize(10);
-	return scheduler;
-    }    
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(10);
+        return scheduler;
+    }
 
 }

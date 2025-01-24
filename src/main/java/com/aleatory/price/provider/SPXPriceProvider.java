@@ -27,20 +27,20 @@ import com.aleatory.price.events.SPXExternalTickReceivedEvent;
 public class SPXPriceProvider {
     private static final Logger logger = LoggerFactory.getLogger(SPXPriceProvider.class);
     private static Logger spxLogger = LoggerFactory.getLogger("SPXLOGGER");
-    
+
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
 
     @Autowired
     private PricingAPIClient client;
-    
+
     private Stock spx;
 
     private Price spxPrice;
     private int spxTickerId;
 
     int spxContractDetailsReqId;
-    
+
     @PostConstruct
     private void setSPXAndSPXPrice() {
         spx = client.getEmptyVendorSpecificStock();
@@ -59,9 +59,9 @@ public class SPXPriceProvider {
 
     public WirePrice getSPXPrice() {
         if (spxPrice.getLast() == 0.0) {
-        	if( client != null ) {
-        		client.requestMarketData(-1, spx, true);
-        	}
+            if (client != null) {
+                client.requestMarketData(-1, spx, true);
+            }
             return new WirePrice(0.0, 0.0, 0.0);
         }
         return new WirePrice(spxPrice.getLast(), spxPrice.getChange(), spxPrice.getChangePercent());
@@ -98,9 +98,9 @@ public class SPXPriceProvider {
             applicationEventPublisher.publishEvent(new SPXContractValidEvent(this));
         }
     }
-    
+
     public Price getRawSPXPrice() {
-    	return spxPrice;
+        return spxPrice;
     }
 
     @EventListener
@@ -108,22 +108,23 @@ public class SPXPriceProvider {
         if (event.getTickerId() != spxTickerId) {
             return;
         }
-        
-        //Throw away anything but last. (We don't do anything with IBKR's close--we fetch that ourselves, since IBKR's is kinda hosed.)
-        if( event.getPriceType() != PriceType.LAST && event.getPriceType() != PriceType.CLOSE ) {
+
+        // Throw away anything but last. (We don't do anything with IBKR's close--we
+        // fetch that ourselves, since IBKR's is kinda hosed.)
+        if (event.getPriceType() != PriceType.LAST && event.getPriceType() != PriceType.CLOSE) {
             spxLogger.debug("SPX tick: {} of {} ", event.getPriceType(), event.getPrice());
             return;
         }
         event.setPriceField(spxPrice);
-        
-        //Can happen if we get a tick before we get yesterday's close
-        if( spxPrice.getChangePercent() == 100.0) {
-        	logger.warn("Got 100% change, last is {}, close is {}, change is {}, change pct is {}", spxPrice.getLast(), spxPrice.getAdjustedClose(), spxPrice.getChange(), spxPrice.getChangePercent());
-        	return;
+
+        // Can happen if we get a tick before we get yesterday's close
+        if (spxPrice.getChangePercent() == 100.0) {
+            logger.warn("Got 100% change, last is {}, close is {}, change is {}, change pct is {}", spxPrice.getLast(), spxPrice.getAdjustedClose(), spxPrice.getChange(), spxPrice.getChangePercent());
+            return;
         }
-        
+
         spxLogger.debug("SPX tick: {} of {} ", event.getPriceType(), event.getPrice());
-        
+
         applicationEventPublisher.publishEvent(new SPXExternalTickReceivedEvent(this, event.getPriceType(), event.getPrice()));
         applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
     }
@@ -137,7 +138,6 @@ public class SPXPriceProvider {
             applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
         }
     }
-
 
     private void subscribeToSPXQuotes() {
         Price spxPrice = new Price();

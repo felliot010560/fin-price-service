@@ -12,18 +12,31 @@ import com.aleatory.common.domain.IronCondor;
 public interface PricingAPIClient {
     static final String SPX_SYMBOL = "SPX";
     static final String SPX_NAME = "S&P 500 Index";
+
     void cancelMarketData(int tickerId);
+
     int requestMarketData(int oldTickerId, PriceableSecurity security, boolean isSnapshot);
+
     int requestPriceVendorSpecificInformation(PriceableSecurity security);
+
     void requestClosePrices(PriceableSecurity security);
+
     void requestHistoricalSPXPrices(Stock spx, LocalDate forDate);
+
     void requestStrikesAndExpirations(PriceableSecurity underlying);
+
     int startImpliedVolCalculation(Option option, double priceForCalc, double underlyingPrice);
+
     Option getEmptyVendorSpecificOption();
+
     Stock getEmptyVendorSpecificStock();
+
     void checkConnectionAlive();
+
     /**
-     * Builds an iron condor specific to the trading system ({@link IBIronCondor} for IBKR, e.g.)
+     * Builds an iron condor specific to the trading system ({@link IBIronCondor}
+     * for IBKR, e.g.)
+     * 
      * @param longCall
      * @param shortCall
      * @param shortPut

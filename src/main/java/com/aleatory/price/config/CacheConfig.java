@@ -30,7 +30,7 @@ public class CacheConfig {
 
     @Value("${spring.redis.port}")
     private int REDIS_PORT;
-    
+
     @Bean
     public JedisConnectionFactory jedisConnectionFactory() {
         RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(REDIS_HOSTNAME, REDIS_PORT);

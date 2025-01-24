@@ -141,14 +141,15 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
     }
 
     private boolean suppressError(int errorCode, String errorMsg) {
-        boolean suppress = (errorCode == 200 && "No security definition has been found for the request".equals(errorMsg)) || (errorCode == 202 && (errorMsg == null || errorMsg.startsWith("Order Canceled"))) || (errorCode == 300);
+        boolean suppress = (errorCode == 200 && "No security definition has been found for the request".equals(errorMsg))
+                || (errorCode == 202 && (errorMsg == null || errorMsg.startsWith("Order Canceled"))) || (errorCode == 300);
         return suppress;
     }
 
     @Override
     public void tickPrice(int tickerId, int field, double price, TickAttrib attrib) {
         logger.debug("Got tick: tickerId {}, field {}, price {}", tickerId, field, price);
-        if( field >= 66 && field <= 68 ) {
+        if (field >= 66 && field <= 68) {
             logger.warn("Getting delayed ticks. Check market data subscriptions.");
         }
         TickReceivedEvent event = new TickReceivedEvent(this, tickerId, field, price);
@@ -160,7 +161,8 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
     private static final int CUSTOM_OPTION_CALCULATION = 53;
 
     @Override
-    public void tickOptionComputation(int tickerId, int field, int tickAttrib, double impliedVol, double delta, double optPrice, double pvDividend, double gamma, double vega, double theta, double undPrice) {
+    public void tickOptionComputation(int tickerId, int field, int tickAttrib, double impliedVol, double delta, double optPrice, double pvDividend, double gamma, double vega, double theta,
+            double undPrice) {
         // API sends a slew of impvols based on bid, ask, etc.--we only want the one
         // based on midpoint, our customm calc
         if (field != CUSTOM_OPTION_CALCULATION) {
@@ -200,12 +202,12 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
         int tickerId = idProvider.currTickerIdIncrement();
 
         IBSecurity ibSecurity = (IBSecurity) security;
-        if( ibSecurity.getIbContractDetails() == null ) {
-        	logger.warn("Could not request market data for {} because we don't have contract info.", ibSecurity);
-        	return 0;
+        if (ibSecurity.getIbContractDetails() == null) {
+            logger.warn("Could not request market data for {} because we don't have contract info.", ibSecurity);
+            return 0;
         }
-        if( security.getClass().isAssignableFrom(IronCondor.class) && !isSnapshot ) {
-        	logger.info("Requesting market data for {}.", security);
+        if (security.getClass().isAssignableFrom(IronCondor.class) && !isSnapshot) {
+            logger.info("Requesting market data for {}.", security);
         }
         client.reqMktData(tickerId, ibSecurity.getContract(), "", isSnapshot, false, null);
         return tickerId;
@@ -298,12 +300,12 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
         return new IBIronCondor((IBOption) longCall, (IBOption) shortCall, (IBOption) shortPut, (IBOption) longPut, quantity);
     }
 
-	@Override
-	public void checkConnectionAlive() {
-		if( client == null ) {
-			return;
-		}
-		client.reqIds(-1);
-	}
+    @Override
+    public void checkConnectionAlive() {
+        if (client == null) {
+            return;
+        }
+        client.reqIds(-1);
+    }
 
 }

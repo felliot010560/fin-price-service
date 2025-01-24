@@ -7,13 +7,12 @@ public class OptionGroupImpVolComplete extends ApplicationEvent {
     private int groupId;
 
     public OptionGroupImpVolComplete(Object source, int groupId) {
-	super(source);
-	this.groupId = groupId;
+        super(source);
+        this.groupId = groupId;
     }
 
     public int getGroupId() {
-	return groupId;
+        return groupId;
     }
-    
-    
+
 }

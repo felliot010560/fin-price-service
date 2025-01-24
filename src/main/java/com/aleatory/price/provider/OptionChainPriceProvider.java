@@ -1,6 +1,5 @@
 package com.aleatory.price.provider;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -13,8 +12,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-
-import javax.annotation.PostConstruct;
 
 import org.fattails.domain.Option;
 import org.fattails.domain.OptionPrice;
@@ -29,7 +26,6 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
 import com.aleatory.common.events.ContractInfoAvailableEvent;
-import com.aleatory.common.events.ReinitializeEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.price.events.AllExpirationsAndStrikesReceivedEvent;
@@ -43,10 +39,10 @@ import com.aleatory.price.events.SPXContractValidEvent;
 public class OptionChainPriceProvider {
     private static final Logger logger = LoggerFactory.getLogger(OptionChainPriceProvider.class);
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-    
-	@Autowired
-	@Qualifier("pricesScheduler")
-	TaskScheduler pricesScheduler;
+
+    @Autowired
+    @Qualifier("pricesScheduler")
+    TaskScheduler pricesScheduler;
 
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
@@ -65,16 +61,8 @@ public class OptionChainPriceProvider {
     private Map<String, Option> optionChain;
 
     private Map<Integer, Option> tickers = new HashMap<>();
-    
-    private ZonedDateTime lastInitializationTimestamp;
-    
-    @PostConstruct
-    private void scheduleReinitialization() {
-    	pricesScheduler.scheduleWithFixedDelay( () -> {
-    		applicationEventPublisher.publishEvent(new ReinitializeEvent(this));
-    	}, ZonedDateTime.now().plus(1, ChronoUnit.HOURS).toInstant(), Duration.of(1, ChronoUnit.HOURS) );
-    }
 
+    private ZonedDateTime lastInitializationTimestamp;
 
     public void requestQuoteOrSubscription(Option option) {
         int currTickerId = client.requestMarketData(0, option, true);
@@ -100,14 +88,10 @@ public class OptionChainPriceProvider {
         group.forEach(option -> optionToGroupId.remove(option));
     }
 
-    @EventListener({SPXContractValidEvent.class, ReinitializeEvent.class})
+    @EventListener({ SPXContractValidEvent.class })
     private void requestOptionChain(ApplicationEvent event) {
         logger.info("Requesting strikes and expirations due to event {}.", event);
-        //Don't re-request if it's the same day as the last initialization
-        if( event instanceof ReinitializeEvent && lastInitializationTimestamp != null && ZonedDateTime.now().getDayOfYear() == lastInitializationTimestamp.getDayOfYear() ) {
-        	logger.info("Not reinitializing--last initialization was at {}", lastInitializationTimestamp);
-        	return;
-        }
+
         logger.info("Initializing/reinitializing--last initialization was at {}", lastInitializationTimestamp == null ? "NEVER" : lastInitializationTimestamp);
         lastInitializationTimestamp = ZonedDateTime.now();
         client.requestStrikesAndExpirations(spxPriceProvider.getSPX());
@@ -185,7 +169,7 @@ public class OptionChainPriceProvider {
 
     private void getOptionInformation() {
         LocalDate nextWeek = LocalDate.now().plus(7, ChronoUnit.DAYS);
-        
+
         expDateForOption = Date.from(nextWeek.atStartOfDay(ZoneId.of("America/Chicago")).toInstant());
         logger.info("Expiration to trade is {}", expDateForOption.toString());
         // Create all the optionChain and request contract details
@@ -220,7 +204,7 @@ public class OptionChainPriceProvider {
 
     Map<Integer, Option> pendingContractRequestIds = new HashMap<>();
     private int expirationStrikesNotFound = 0;
-    
+
     // Get contract data for each option in the chain
     private void requestContractDetailsForOptionChain() {
         pendingContractRequestIds.clear();
@@ -261,7 +245,5 @@ public class OptionChainPriceProvider {
     public Map<String, Option> getOptionChain() {
         return optionChain;
     }
-    
-    
 
 }

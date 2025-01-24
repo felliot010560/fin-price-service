@@ -43,92 +43,91 @@ import com.aleatory.price.provider.SPXPriceProvider;
  */
 @Service
 public class PriceBackendMessagingController {
-	private static final Logger logger = LoggerFactory.getLogger(PriceBackendMessagingController.class);
+    private static final Logger logger = LoggerFactory.getLogger(PriceBackendMessagingController.class);
 
-	@Autowired
-	private PubSubMessagingOperations messagingOperations;
+    @Autowired
+    private PubSubMessagingOperations messagingOperations;
 
-	@Autowired
-	private SPXPriceProvider spxPriceProvider;
+    @Autowired
+    private SPXPriceProvider spxPriceProvider;
 
-	@Autowired
-	private CondorProvider condorPriceProvider;
+    @Autowired
+    private CondorProvider condorPriceProvider;
 
-	@Autowired
-	@Qualifier("pricesScheduler")
-	TaskScheduler pricesScheduler;
+    @Autowired
+    @Qualifier("pricesScheduler")
+    TaskScheduler pricesScheduler;
 
-	private AtomicLong lastPriceSent = new AtomicLong();
+    private AtomicLong lastPriceSent = new AtomicLong();
 
-	@PostConstruct
-	private void sendPricesEvery10Seconds() {
-		pricesScheduler.scheduleAtFixedRate(() -> {
-			boolean lastTick10SecondsOld = lastPriceSent.get() + 900l < System.currentTimeMillis();
-			if (lastTick10SecondsOld) {
-				logger.debug("Last price sent at {}, sending now at {}", Instant.ofEpochMilli(lastPriceSent.get()),
-						Instant.now());
-				sendSPXPrice(null);
-				IronCondor<? extends Option> condor = condorPriceProvider.getCondor();
-				if( condor == null ) {
-					return;
-				}
-				NewCondorEvent event = new NewCondorEvent(this, condor);
-				sendCondor(event);
-				sendFullCondor(event);
-				Price price = condorPriceProvider.getCondorPrice();
-				NewCondorPriceEvent priceEvent = new NewCondorPriceEvent(this, price);
-				sendCondorPrice(priceEvent);
-			}
-		}, Instant.now().plus(10, ChronoUnit.SECONDS), Duration.of(10, ChronoUnit.SECONDS));
+    @PostConstruct
+    private void sendPricesEvery10Seconds() {
+        pricesScheduler.scheduleAtFixedRate(() -> {
+            boolean lastTick10SecondsOld = lastPriceSent.get() + 900l < System.currentTimeMillis();
+            if (lastTick10SecondsOld) {
+                logger.debug("Last price sent at {}, sending now at {}", Instant.ofEpochMilli(lastPriceSent.get()), Instant.now());
+                sendSPXPrice(null);
+                IronCondor<? extends Option> condor = condorPriceProvider.getCondor();
+                if (condor == null) {
+                    return;
+                }
+                NewCondorEvent event = new NewCondorEvent(this, condor);
+                sendCondor(event);
+                sendFullCondor(event);
+                Price price = condorPriceProvider.getCondorPrice();
+                NewCondorPriceEvent priceEvent = new NewCondorPriceEvent(this, price);
+                sendCondorPrice(priceEvent);
+            }
+        }, Instant.now().plus(10, ChronoUnit.SECONDS), Duration.of(10, ChronoUnit.SECONDS));
 
-	}
+    }
 
-	@EventListener
-	private void sendSPXPrice(NewSPXPriceEvent event) {
-		WirePrice spxPrice = spxPriceProvider.getSPXPrice();
-		logger.debug("Sending spx price to backend: {}", spxPrice);
-		messagingOperations.publishMessage("/topic/prices.spx", spxPrice);
-		lastPriceSent.set(System.currentTimeMillis());
-	}
+    @EventListener
+    private void sendSPXPrice(NewSPXPriceEvent event) {
+        WirePrice spxPrice = spxPriceProvider.getSPXPrice();
+        logger.debug("Sending spx price to backend: {}", spxPrice);
+        messagingOperations.publishMessage("/topic/prices.spx", spxPrice);
+        lastPriceSent.set(System.currentTimeMillis());
+    }
 
-	@EventListener
-	private void sendFullCondor(NewCondorEvent event) {
-		WireFullCondor wireCondor = event.getFullCondor();
-		if (wireCondor == null) {
-			return;
-		}
-		logger.info("Sending full condor: {}", wireCondor.toString());
-		messagingOperations.publishMessage("/topic/prices.current.condor.full", wireCondor);
-	}
+    @EventListener
+    private void sendFullCondor(NewCondorEvent event) {
+        WireFullCondor wireCondor = event.getFullCondor();
+        if (wireCondor == null) {
+            return;
+        }
+        logger.info("Sending full condor: {}", wireCondor.toString());
+        messagingOperations.publishMessage("/topic/prices.current.condor.full", wireCondor);
+    }
 
-	@EventListener
-	private void sendCondor(NewCondorEvent event) {
-		WireCondor wireCondor = event.getCondor();
-		if (wireCondor == null) {
-			return;
-		}
-		logger.debug("Sending new condor to backend: {}", wireCondor);
-		messagingOperations.publishMessage("/topic/prices.current.condor", wireCondor);
-		lastPriceSent.set(System.currentTimeMillis());
-	}
+    @EventListener
+    private void sendCondor(NewCondorEvent event) {
+        WireCondor wireCondor = event.getCondor();
+        if (wireCondor == null) {
+            return;
+        }
+        logger.debug("Sending new condor to backend: {}", wireCondor);
+        messagingOperations.publishMessage("/topic/prices.current.condor", wireCondor);
+        lastPriceSent.set(System.currentTimeMillis());
+    }
 
-	@EventListener
-	private void sendImpvol(NewImpliedVolatilityEvent event) {
-		Double impVol = event.getImpliedVolatility();
-		logger.debug("Sending implied vol to backend: {}", impVol);
-		messagingOperations.publishMessage("/topic/prices.impvol", impVol);
-		lastPriceSent.set(System.currentTimeMillis());
-	}
+    @EventListener
+    private void sendImpvol(NewImpliedVolatilityEvent event) {
+        Double impVol = event.getImpliedVolatility();
+        logger.debug("Sending implied vol to backend: {}", impVol);
+        messagingOperations.publishMessage("/topic/prices.impvol", impVol);
+        lastPriceSent.set(System.currentTimeMillis());
+    }
 
-	@EventListener
-	private void sendCondorPrice(NewCondorPriceEvent event) {
-		WirePrice wirePrice = event.getPrice();
-		if ( wirePrice == null || wirePrice.hasInvalidBidAsk() ) {
-			return;
-		}
-		logger.debug("Sending condor price of {} to backend", wirePrice);
-		messagingOperations.publishMessage("/topic/prices.condor", wirePrice);
-		lastPriceSent.set(System.currentTimeMillis());
-	}
+    @EventListener
+    private void sendCondorPrice(NewCondorPriceEvent event) {
+        WirePrice wirePrice = event.getPrice();
+        if (wirePrice == null || wirePrice.hasInvalidBidAsk()) {
+            return;
+        }
+        logger.debug("Sending condor price of {} to backend", wirePrice);
+        messagingOperations.publishMessage("/topic/prices.condor", wirePrice);
+        lastPriceSent.set(System.currentTimeMillis());
+    }
 
 }
