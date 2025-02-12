@@ -2,10 +2,13 @@ package com.aleatory.price.provider;
 
 import static com.aleatory.price.provider.PricingAPIClient.SPX_SYMBOL;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
@@ -34,11 +38,14 @@ import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
 import com.aleatory.price.events.OptionChainCompleteEvent;
 
+import jakarta.annotation.PostConstruct;
+
 @Component
 public class CondorProvider {
     private static final Logger logger = LoggerFactory.getLogger(CondorProvider.class);
     private static Logger ticksLogger = LoggerFactory.getLogger("CONDORTICKSLOGGER");
     private static final double MINIMUM_VALID_BID = -10.0;
+    private static final long NON_TICKING_CONDORS_INTERVAL_MINUTES = 1;
 
     @Autowired
     @Qualifier("pricesScheduler")
@@ -62,11 +69,18 @@ public class CondorProvider {
 
     private double impVol;
 
-    // private IronCondor<? extends Option> condor;
     private Map<String, Integer> condorToTicker = Collections.synchronizedMap(new HashMap<>());
     private Map<Integer, IronCondor<?>> tickersToCondor = Collections.synchronizedMap(new HashMap<>());
+    
+    private Map<Integer, LocalDateTime> lastTicks = Collections.synchronizedMap(new HashMap<>());
 
     private AtomicInteger condorTickerId = new AtomicInteger(-1);
+    
+    @PostConstruct
+    private void startNonTickingCheck() {
+        scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
+                new Date( System.currentTimeMillis() + 60000).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES));
+    }
 
     @EventListener(ConnectionUsableEvent.class)
     private void getSPXInformation() {
@@ -161,8 +175,31 @@ public class CondorProvider {
                 ticksLogger.info("Sent: {}, {}, {}", event.getTickerId(), event.getPriceType(), event.getPrice());
             }
         }
+        lastTicks.put(event.getTickerId(), LocalDateTime.now());
     }
-
+    
+    /**
+     * Runs every N minutes (currently 1). Finds condors that haven't ticked since the last check and:
+     * <ol>
+     * <li>Removes them from the tickers to condors and condors to tickers index maps.
+     * <li>Removed them from the lastTicks map.
+     * <li>Re-requests market data for the condor.
+     * </ol>
+     */
+    private synchronized void findNonTickingCondors() {
+        List<Integer> nonTicking = lastTicks.keySet().stream().
+                filter( ticker -> lastTicks.get(ticker).isBefore(LocalDateTime.now().minus(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES))).toList();
+        for( Integer ticker : nonTicking ) {
+            lastTicks.remove(ticker);
+            IronCondor<? extends Option> forCondor = tickersToCondor.remove(ticker);
+            if (forCondor != null) {
+                condorToTicker.remove(forCondor.toString());
+                requestCondorMarketData(forCondor);
+            }
+        }
+        logger.warn("Non-ticking condors: {}", nonTicking);
+    }
+    
     double highBandStrike, lowBandStrike;
 
     /**
@@ -245,7 +282,8 @@ public class CondorProvider {
         }
     }
 
-    private static final int MAX_NUMBER_OF_TICKERS = 20;
+    @Value("${condors.prices.max.tickers:20}")
+    private int MAX_NUMBER_OF_TICKERS;
 
     private PriorityQueue<TickerTimestamp> tickerAges = new PriorityQueue<>();
     private Map<Integer, TickerTimestamp> tickersToTimestamps = new HashMap<>();
@@ -275,10 +313,9 @@ public class CondorProvider {
             return;
         }
 
-        // Get a snapshot in case the condor doesn't tick
-        client.requestMarketData(0, condor, true);
         // Then subscribe (and cancel the previous condor ticker)
         condorTickerId.set(client.requestMarketData(condorTickerId.get(), condor, false));
+        lastTicks.put(condorTickerId.get(), LocalDateTime.now().minus(1, ChronoUnit.DAYS));
         ticksLogger.info("Current ticker (new): {}", condorTickerId.get());
         // Index the new ticker id.
         condorToTicker.put(condor.toString(), condorTickerId.get());
@@ -292,10 +329,14 @@ public class CondorProvider {
             TickerTimestamp tt = tickerAges.remove();
             client.cancelMarketData(tt.tickerId);
             var condorToRemove = tickersToCondor.remove(tt.tickerId);
-            String condorToRemoveString = condorToRemove.toString();
-            condorToTicker.remove(condorToRemoveString);
-            logger.info("Removed ticker {} for condor {} (timestamp of {}); there are now {} tickers in the age queue, {} in tickers map, {} in condors map.", tt.tickerId, condorToRemove,
-                    tt.timestamp, tickerAges.size(), tickersToCondor.size(), condorToTicker.size());
+            if( condorToRemove == null ) {
+                logger.info("Old condor already reamoved for ticker {}", tt.tickerId);
+            } else {
+                String condorToRemoveString = condorToRemove.toString();
+                condorToTicker.remove(condorToRemoveString);
+                logger.info("Removed ticker {} for condor {} (timestamp of {}); there are now {} tickers in the age queue, {} in tickers map, {} in condors map.", tt.tickerId, condorToRemove,
+                        tt.timestamp, tickerAges.size(), tickersToCondor.size(), condorToTicker.size());
+            }
         }
 
         logger.info("Added ticker {} for condor {}\nThere are now {} tickers.", condorTickerId.get(), condor, tickersToCondor.size());

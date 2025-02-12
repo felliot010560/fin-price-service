@@ -3,6 +3,8 @@ package com.aleatory.price.backend.messaging;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.PostConstruct;
@@ -23,6 +25,7 @@ import com.aleatory.common.domain.WireFullCondor;
 import com.aleatory.common.domain.WirePrice;
 import com.aleatory.common.messaging.PubSubMessagingOperations;
 import com.aleatory.price.api.PriceStompController;
+import com.aleatory.price.events.ExpirationToTradeEvent;
 import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
@@ -88,6 +91,14 @@ public class PriceBackendMessagingController {
         logger.debug("Sending spx price to backend: {}", spxPrice);
         messagingOperations.publishMessage("/topic/prices.spx", spxPrice);
         lastPriceSent.set(System.currentTimeMillis());
+    }
+    
+    @EventListener
+    private void sendExpirationToTrade(ExpirationToTradeEvent event) {
+        logger.info("Sending expiration to trade of {}", event.getExpirationToTrade());
+        Map<String,String> expirationForJson = new HashMap<>();
+        expirationForJson.put("expiration", event.getExpirationToTrade());
+        messagingOperations.publishMessage("/topic/prices.expiration", expirationForJson);
     }
 
     @EventListener

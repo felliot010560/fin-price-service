@@ -1,10 +1,12 @@
 package com.aleatory.price.provider;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -25,10 +27,12 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
+import com.aleatory.common.events.BackendConnectionStartedEvent;
 import com.aleatory.common.events.ContractInfoAvailableEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.price.events.AllExpirationsAndStrikesReceivedEvent;
+import com.aleatory.price.events.ExpirationToTradeEvent;
 import com.aleatory.price.events.OptionChainCompleteEvent;
 import com.aleatory.price.events.OptionGroupImpVolComplete;
 import com.aleatory.price.events.OptionImpVolAvailableEvent;
@@ -60,32 +64,66 @@ public class OptionChainPriceProvider {
 
     private Map<String, Option> optionChain;
 
-    private Map<Integer, Option> tickers = new HashMap<>();
+    private Map<Integer, Option> tickers;
 
     private ZonedDateTime lastInitializationTimestamp;
+    
+    private static class OptionGroup {
+        LocalDateTime created;
+        List<Option> options;
+        
+        OptionGroup(LocalDateTime created, List<Option> options) {
+            this.created = created;
+            this.options = options;
+        }
+    }
+    private Map<Integer, OptionGroup> pendingGroups;
+    private Map<Option, Integer> optionToGroupId;
+    
+    public OptionChainPriceProvider() {
+        tickers = Collections.synchronizedMap(new HashMap<>());
+        pendingGroups = Collections.synchronizedMap(new HashMap<>());
+        optionToGroupId = Collections.synchronizedMap(new HashMap<>());
+    }
+    
+    @EventListener(BackendConnectionStartedEvent.class)
+    private void setExpiration() {
+        LocalDate nextWeek = LocalDate.now().plus(7, ChronoUnit.DAYS);
+
+        expDateForOption = Date.from(nextWeek.atStartOfDay(ZoneId.of("America/Chicago")).toInstant());
+        String expirationDateString = DateTimeFormatter.ofPattern("MMM-dd-yy").format(nextWeek);
+        ExpirationToTradeEvent event = new ExpirationToTradeEvent(this, expirationDateString);
+        applicationEventPublisher.publishEvent(event);
+        logger.info("Expiration to trade is {}", expDateForOption.toString());        
+    }
 
     public void requestQuoteOrSubscription(Option option) {
         int currTickerId = client.requestMarketData(0, option, true);
         tickers.put(currTickerId, option);
 
-        logger.debug("Requesting option snapshot on ticker ID {}", currTickerId);
+        logger.debug("Requesting option snapshot on ticker ID {}, option {}", currTickerId, option);
     }
 
-    private Map<Integer, List<Option>> pendingGroups = new HashMap<>();
-    private Map<Option, Integer> optionToGroupId = new HashMap<>();
-
-    public void requestOptionSnapshotGroup(int groupId, List<Option> optionGroup) {
+    public synchronized void requestOptionSnapshotGroup(int groupId, List<Option> options) {
+        OptionGroup optionGroup = new OptionGroup(LocalDateTime.now(), options);
         pendingGroups.put(groupId, optionGroup);
-        logger.debug("Requesting {} options for group Id {}.", optionGroup.size(), groupId);
-        optionGroup.forEach(option -> {
+        logger.info("Requesting {} options for group Id {}.", optionGroup.options.size(), groupId);
+        optionGroup.options.forEach(option -> {
+            option.getPrice().setBid(0.0);
+            option.getPrice().setAsk(0.0);
             optionToGroupId.put(option, groupId);
             requestQuoteOrSubscription(option);
         });
     }
 
     public void removeOptionSnapshotGroup(int groupId) {
-        List<Option> group = pendingGroups.remove(groupId);
-        group.forEach(option -> optionToGroupId.remove(option));
+        OptionGroup optionGroup = pendingGroups.remove(groupId);
+        List<Option> group = optionGroup.options;
+        if( group == null ) {
+            logger.info("Attempt to remove nonexistent option group {}", groupId);
+            return;
+        }
+        logger.info("Removed option group/with options {}/{}", groupId, group);
     }
 
     @EventListener({ SPXContractValidEvent.class })
@@ -115,51 +153,77 @@ public class OptionChainPriceProvider {
     private void handleTick(TickReceivedEvent event) {
         // Ignore weird -1 prices.
         if (event.getPrice() < 0.0) {
-            logger.debug("Got weird -1 price for ticker {}", event.getTickerId());
+            logger.debug("Got weird -1 price for ticker {}, {} snapshot ticker, {}", event.getTickerId(), tickers.containsKey(event.getTickerId()) ? "is" : "is not", event.getPriceType());
             return;
         }
         int ticker = event.getTickerId();
         Option option = tickers.get(ticker);
         logger.debug("Got tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
-        if (option == null || (event.getPriceType() != PriceType.LAST && event.getPriceType() != PriceType.BID && event.getPriceType() != PriceType.ASK)) {
+        if (option == null || (event.getPriceType() != PriceType.BID && event.getPriceType() != PriceType.ASK)) {
             return;
         }
         logger.debug("Processing tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
         OptionPrice price = (OptionPrice) option.getPrice();
         event.setPriceField(price);
+        
+        //Both bid and ask need to be set.
+        if( price.getBid() == 0.0 || price.getAsk() == 0.0 ) {
+            logger.debug("Not calculating imp vol, bid/ask: {}/{}", price.getBid(), price.getAsk());
+            return;
+        }
 
         double priceForCalc = price.getLatestPrice();
-        logger.debug("Calculating vol for option {} with price of {}, midpoint {}, last {}, ticker id of {}", option, priceForCalc, price.getMidpoint(), price.getLast(), ticker);
+        logger.debug("On tick for {}, calculating vol for option {} with price of {}, midpoint {}, last {}, ticker id of {}", event.getPriceType(), priceForCalc, price.getMidpoint(), price.getLast(), ticker);
         if (priceForCalc == 0.0 || Double.isNaN(priceForCalc)) {
             logger.debug("No valid price for calc");
             return;
         }
         int impVolTicker = client.startImpliedVolCalculation(option, priceForCalc, spxPriceProvider.getSPXLast());
+        logger.debug("Imp vol ticker/option: {}/{}", impVolTicker, option);
         tickers.put(impVolTicker, option);
     }
 
     @EventListener
-    private void handleOptionImpVol(OptionImpVolAvailableEvent event) {
+    private synchronized void handleOptionImpVol(OptionImpVolAvailableEvent event) {
         int ticker = event.getTickerId();// > IMP_VOL_FLAG ? event.getTickerId() - IMP_VOL_FLAG : event.getTickerId();
-        Option option = tickers.get(ticker);
+        Option option = tickers.remove(ticker);
         if (option == null) {
             return;
         }
         logger.debug("Received implied vol of {} for ticker {}, option {}", event.getImpVol(), event.getTickerId(), option);
         option.getPrice().setImpliedVolatility(event.getImpVol());
 
-        Integer groupId = optionToGroupId.get(option);
+        List<Option> group;
+        Integer groupId;
+
+        groupId = optionToGroupId.get(option);
         if (groupId == null) { // Not part of a group
-            logger.debug("Got implied vol for no-group option {}", option);
+            logger.warn("Got implied vol for no-group ticker/option {}--{}", ticker, option);
+            logger.warn("Dumping optionToGroupId:\n{}", optionToGroupId);
+            logger.warn("Dumping pendingGroups:\n{}", pendingGroups);
             return;
         }
         logger.debug("Past null group check.");
-        List<Option> group = pendingGroups.get(groupId);
-        List<Option> noImpVolOptions = group.stream().filter(opt -> opt.getPrice().getImpliedVolatility() == 0.0).toList();
-        logger.debug("Found {} no-imp-vol options in group {}", noImpVolOptions.size(), groupId);
-        if (noImpVolOptions.isEmpty()) {
-            logger.debug("Found complete option group {}", groupId);
+        OptionGroup optionGroup = pendingGroups.get(groupId);
+        group = optionGroup.options;
+        group.remove(option);
+        optionToGroupId.remove(option);
+        logger.debug("Removed option {} from group {}, {} left in group", option, groupId, optionGroup.options.size());
+        if (group.size() == 0) {
+            removeOptionSnapshotGroup(groupId);
+            logger.info("Found complete option group {}", groupId);
             applicationEventPublisher.publishEvent(new OptionGroupImpVolComplete(this, groupId));
+        }
+
+        checkOldIncompleteOptionGroups();
+    }
+    
+    private void checkOldIncompleteOptionGroups() {
+        final LocalDateTime tenMinutesAgo = LocalDateTime.now().minus(10, ChronoUnit.MINUTES);
+        List<Integer> oldGroupIds = pendingGroups.keySet().stream().filter(currGroupId -> pendingGroups.get(currGroupId).created.isBefore(tenMinutesAgo)).toList();
+        for( Integer oldGroupId : oldGroupIds ) {
+            logger.info("Removing old group ID {}", oldGroupId);
+            removeOptionSnapshotGroup(oldGroupId);
         }
     }
 
@@ -168,10 +232,6 @@ public class OptionChainPriceProvider {
     }
 
     private void getOptionInformation() {
-        LocalDate nextWeek = LocalDate.now().plus(7, ChronoUnit.DAYS);
-
-        expDateForOption = Date.from(nextWeek.atStartOfDay(ZoneId.of("America/Chicago")).toInstant());
-        logger.info("Expiration to trade is {}", expDateForOption.toString());
         // Create all the optionChain and request contract details
         for (Double strike : strikes) {
             Option put = client.getEmptyVendorSpecificOption(), call = client.getEmptyVendorSpecificOption();
@@ -214,7 +274,7 @@ public class OptionChainPriceProvider {
             int reqId = client.requestPriceVendorSpecificInformation(option);
             pendingContractRequestIds.put(reqId, option);
         }
-        logger.debug("Requested all option chain information for {}", expDateForOption);
+        logger.info("Requested all option chain information for {}", expDateForOption);
     }
 
     @EventListener

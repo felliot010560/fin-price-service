@@ -78,13 +78,13 @@ public class ImpliedVolatilityProvider {
     }
 
     private ScheduledFuture<?> impliedVolCalcTask;
+    private static final Duration IMPLIED_VOL_CALC_EVERY = Duration.of(10, ChronoUnit.SECONDS);
 
     private void scheduleImpliedVolCalc() {
         if (impliedVolCalcTask != null) {
             impliedVolCalcTask.cancel(false);
         }
-        Duration calcDuration = Duration.of(10, ChronoUnit.SECONDS);
-        logger.info("Scheduling implied vol calcs at {} to run every {}", ZonedDateTime.now(), calcDuration);
+        logger.info("Scheduling implied vol calcs at {} to run every {}", ZonedDateTime.now(), IMPLIED_VOL_CALC_EVERY);
 
         impliedVolCalcTask = scheduler.scheduleAtFixedRate(() -> {
             if (TradingDays.inIndexTradingHours() || TradingDays.inTradingHours()) {
@@ -92,7 +92,7 @@ public class ImpliedVolatilityProvider {
                 startImpliedVolatilityCalculation();
                 lastImpVolCalc = System.currentTimeMillis();
             }
-        }, calcDuration);
+        }, IMPLIED_VOL_CALC_EVERY);
     }
 
     @EventListener(ConnectionUsableEvent.class)
@@ -102,7 +102,7 @@ public class ImpliedVolatilityProvider {
 
     @EventListener
     private void optionGroupComplete(OptionGroupImpVolComplete event) {
-        logger.debug("Received event for option group {}", event.getGroupId());
+        logger.info("Received complete event for option group {}", event.getGroupId());
         if (event.getGroupId() == groupIdForLastCalc) {
             calculateImpVolIfAllOptionPricesPresent();
         }
@@ -189,6 +189,7 @@ public class ImpliedVolatilityProvider {
         impVol = (averageImpVol * Math.sqrt(numDays)) / Math.sqrt(365.0);
         logger.debug("Imp vol == {}", impVol);
 
+        logger.info("Sending implied vol event.");
         applicationEventPublisher.publishEvent(new NewImpliedVolatilityEvent(this, impVol));
 
         return impVol;
@@ -201,6 +202,7 @@ public class ImpliedVolatilityProvider {
             if (!allATMOptionsHavePrices()) {
                 return;
             }
+            logger.info("Calculating implied volatility (all ATM options have imp vol).");
             double impVol = calculateImpliedVol();
             // We sometimes get an Infinity value for imp-vol--discard it.
             if (Double.isInfinite(impVol)) {

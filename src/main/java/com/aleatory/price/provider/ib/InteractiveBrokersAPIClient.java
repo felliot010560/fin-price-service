@@ -200,6 +200,7 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
         }
 
         int tickerId = idProvider.currTickerIdIncrement();
+        logger.debug("Requesting market data for security/ticker/snapshot: {}/{}/{}", security, tickerId, isSnapshot);
 
         IBSecurity ibSecurity = (IBSecurity) security;
         if (ibSecurity.getIbContractDetails() == null) {
