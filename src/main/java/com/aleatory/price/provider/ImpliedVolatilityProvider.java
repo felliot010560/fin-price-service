@@ -26,6 +26,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
+import com.aleatory.common.events.ConnectionClosedEvent;
 import com.aleatory.common.events.ConnectionUsableEvent;
 import com.aleatory.common.provider.IdProvider;
 import com.aleatory.common.util.TradingDays;
@@ -94,9 +95,23 @@ public class ImpliedVolatilityProvider {
             }
         }, IMPLIED_VOL_CALC_EVERY);
     }
+    
+    
+    @EventListener(ConnectionClosedEvent.class)
+    private void connectionClosed() {
+        logger.info("Connection to trading API closed; resetting all condor tickers.");
+        optionChain = null;
+        if( impliedVolCalcTask != null ) {
+            impliedVolCalcTask.cancel(true);
+            impliedVolCalcTask = null;
+        }
+    }
 
     @EventListener(ConnectionUsableEvent.class)
     private void initOptionChain() {
+        if( impliedVolCalcTask != null ) {
+            impliedVolCalcTask.cancel(true);
+        }
         optionChain = null;
     }
 

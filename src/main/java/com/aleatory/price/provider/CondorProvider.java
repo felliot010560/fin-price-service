@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.fattails.domain.Option;
@@ -29,6 +30,7 @@ import com.aleatory.common.domain.IronCondor;
 import com.aleatory.common.domain.WireCondor;
 import com.aleatory.common.domain.WireFullCondor;
 import com.aleatory.common.domain.WirePrice;
+import com.aleatory.common.events.ConnectionClosedEvent;
 import com.aleatory.common.events.ConnectionUsableEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
@@ -37,8 +39,6 @@ import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
 import com.aleatory.price.events.OptionChainCompleteEvent;
-
-import jakarta.annotation.PostConstruct;
 
 @Component
 public class CondorProvider {
@@ -76,15 +76,22 @@ public class CondorProvider {
 
     private AtomicInteger condorTickerId = new AtomicInteger(-1);
     
-    @PostConstruct
-    private void startNonTickingCheck() {
-        scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
-                new Date( System.currentTimeMillis() + 60000).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES));
-    }
-
+    private ScheduledFuture<?> checkNonTickingTickersTask;
+    
     @EventListener(ConnectionUsableEvent.class)
     private void getSPXInformation() {
+        checkNonTickingTickersTask = scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
+                new Date( System.currentTimeMillis() + 60000).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES));
+    }
+    
+    @EventListener(ConnectionClosedEvent.class)
+    private void connectionClosed() {
+        logger.info("Connection to trading API closed; resetting all condor tickers.");
         resetCondorTickers();
+        if( checkNonTickingTickersTask != null ) {
+            checkNonTickingTickersTask.cancel(true);
+            checkNonTickingTickersTask = null;
+        }
     }
 
     public synchronized WirePrice getCondorWirePrice() {
