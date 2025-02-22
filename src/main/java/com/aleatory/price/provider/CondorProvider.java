@@ -5,14 +5,13 @@ import static com.aleatory.price.provider.PricingAPIClient.SPX_SYMBOL;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.fattails.domain.Option;
 import org.fattails.domain.Price;
@@ -20,7 +19,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
@@ -45,11 +43,15 @@ public class CondorProvider {
     private static final Logger logger = LoggerFactory.getLogger(CondorProvider.class);
     private static Logger ticksLogger = LoggerFactory.getLogger("CONDORTICKSLOGGER");
     private static final double MINIMUM_VALID_BID = -10.0;
-    private static final long NON_TICKING_CONDORS_INTERVAL_MINUTES = 1;
+    private static final long NON_TICKING_CONDORS_INTERVAL_SECONDS = 10;
 
     @Autowired
     @Qualifier("pricesScheduler")
     private TaskScheduler scheduler;
+    
+    @Autowired
+    @Qualifier("condorsExecutor")
+    private Executor executor;
 
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
@@ -63,31 +65,74 @@ public class CondorProvider {
     @Autowired
     private SPXPriceProvider spxPriceProvider;
 
-    private short quantity = 1;
-
     private Date expDate;
 
     private double impVol;
-
-    private Map<String, Integer> condorToTicker = Collections.synchronizedMap(new HashMap<>());
-    private Map<Integer, IronCondor<?>> tickersToCondor = Collections.synchronizedMap(new HashMap<>());
-    
-    private Map<Integer, LocalDateTime> lastTicks = Collections.synchronizedMap(new HashMap<>());
-
-    private AtomicInteger condorTickerId = new AtomicInteger(-1);
     
     private ScheduledFuture<?> checkNonTickingTickersTask;
     
+    private Map<Integer,Option> optionTickers = new HashMap<>();
+    
+    class CondorTicker {
+        private int tickerId = 0;
+        private List<Integer> legsTickers = new ArrayList<>(4);
+        private IronCondor<?> condor;
+        private boolean ticking = true;
+
+        private LocalDateTime lastTick;
+
+        CondorTicker(IronCondor<? extends Option> condor) {
+            super();
+            this.condor = condor;
+            this.lastTick = LocalDateTime.now().minus(1, ChronoUnit.DAYS);
+        }
+        
+        CondorTicker(int tickerId, IronCondor<? extends Option> condor) {
+            super();
+            this.tickerId = tickerId;
+            this.condor = condor;
+            this.lastTick = LocalDateTime.now().minus(1, ChronoUnit.DAYS);
+        }
+
+        // This method subscribes us to the condor and its individual option legs.
+        private void subscribe() {
+            tickerId = client.requestMarketData(0, condor, false);
+            condor.getLegs().stream().forEach(leg -> {
+                int ticker = client.requestMarketData(0, leg, false);
+                legsTickers.add(ticker);
+                optionTickers.put(ticker, leg);
+            });
+            logger.info("Subscribed to {}, leg tickers: {}", condor, legsTickers);
+
+        }
+
+        private void unsubscribe() {
+            //Cancel market data for the condor and the options
+            client.cancelMarketData(tickerId);
+            legsTickers.stream().forEach(legTicker -> {
+                if (legTicker != null) {
+                    client.cancelMarketData(legTicker);
+                }
+            });
+            //Remove the leg tickers from the map of option tickers.
+            optionTickers.keySet().removeAll(legsTickers);
+            legsTickers.clear();
+        }
+
+    }
+    
+    private CondorTicker condorTicker;
+    
     @EventListener(ConnectionUsableEvent.class)
-    private void getSPXInformation() {
+    private void startNonTickingCondorsCheck() {
         checkNonTickingTickersTask = scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
-                new Date( System.currentTimeMillis() + 60000).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES));
+                new Date( System.currentTimeMillis() + 60000 ).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_SECONDS, ChronoUnit.SECONDS));
     }
     
     @EventListener(ConnectionClosedEvent.class)
     private void connectionClosed() {
-        logger.info("Connection to trading API closed; resetting all condor tickers.");
-        resetCondorTickers();
+        logger.info("Connection to trading API closed; resetting condor tickers.");
+        condorTicker = null;
         if( checkNonTickingTickersTask != null ) {
             checkNonTickingTickersTask.cancel(true);
             checkNonTickingTickersTask = null;
@@ -95,23 +140,20 @@ public class CondorProvider {
     }
 
     public synchronized WirePrice getCondorWirePrice() {
-        if (condorTickerId.get() < 0) {
-            return new WirePrice(null);
+        if (condorTicker == null) {
+            return new WirePrice(null, false);
         }
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
-        if (condor == null) {
-            return new WirePrice(null);
-        }
+        IronCondor<? extends Option> condor = condorTicker.condor;
         Price condorPrice = condor.getPrice();
 
-        return new WirePrice(condorPrice);
+        return new WirePrice(condorPrice, !condorTicker.ticking);
     }
 
     public synchronized Price getCondorPrice() {
-        if (condorTickerId.get() < 0) {
+        if (condorTicker == null) {
             return null;
         }
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
+        IronCondor<? extends Option> condor = condorTicker.condor;
         if (condor == null) {
             return null;
         }
@@ -144,17 +186,14 @@ public class CondorProvider {
             subscribeToCondor();
         } else {
             // Send out the existing condor even if it doesn't change
-            IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
+            IronCondor<? extends Option> condor = condorTicker.condor;
             applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
         }
     }
 
     @EventListener
     synchronized void handleCondorTick(TickReceivedEvent event) {
-        IronCondor<? extends Option> condor = tickersToCondor.get(event.getTickerId());
-        // Old tick--probably condor has been removed but ticker not yet cancelled (or
-        // it's an SPX tick).
-        if (condor == null) {
+        if (condorTicker == null || condorTicker.tickerId != event.getTickerId()) {
             return;
         }
         ticksLogger.info("{}, {}, {}", event.getTickerId(), event.getPriceType(), event.getPrice());
@@ -162,7 +201,7 @@ public class CondorProvider {
         if (event.getPrice() >= 0.0 || (event.getPriceType() == PriceType.BID && event.getPrice() < MINIMUM_VALID_BID)) {
             return;
         }
-        Price condorPrice = condor.getPrice();
+        Price condorPrice = condorTicker.condor.getPrice();
         event.setPriceField(condorPrice);
 
         double bid = condorPrice.getBid(), ask = condorPrice.getAsk();
@@ -177,37 +216,61 @@ public class CondorProvider {
 
         // Don't send bullshit prices
         if (bid != 0.0 && ask != 0.0 && !(bid >= ask)) {
-            if (condorTickerId.get() == event.getTickerId()) {
-                applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice));
-                ticksLogger.info("Sent: {}, {}, {}", event.getTickerId(), event.getPriceType(), event.getPrice());
-            }
+            publishNewCondorTick(event.getTickerId(), condorPrice);
         }
-        lastTicks.put(event.getTickerId(), LocalDateTime.now());
+        condorTicker.lastTick = LocalDateTime.now();
+        condorTicker.ticking = true;
+        logger.info("Set condor price to {}/{}/{}", condorPrice, event.getPriceType(), event.getPrice());
     }
     
+    @EventListener
+    private void handleOptionTick(TickReceivedEvent event) {
+        //Don't handle if we're not handling condor ticks yet.
+        if (condorTicker == null ) {
+            return;
+        }
+        //Don't handle if it's not a leg option tick
+        Option option = optionTickers.get(event.getTickerId());
+        if( option == null ) {
+            return;
+        }
+        event.setPriceField(option.getPrice());
+        logger.info("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
+        
+        //We need to send the option-legs-based price.
+        if( !condorTicker.ticking ) {
+            condorTicker.condor.calculatePriceFromLegs();
+            publishNewCondorTick(event.getTickerId(), getCondorPrice());
+        }
+        List<Double> legPrices = condorTicker.condor.getLegs().stream().map( leg -> leg.getPrice().getMidpoint() ).toList();
+        logger.info( "Leg prices: {}", legPrices );
+    }
+    
+    private void publishNewCondorTick( Integer tickerId, Price condorPrice ) {
+        if( !condorTicker.ticking ) {
+            logger.info("From legs.");
+        }
+        logger.info("Sending condor tick (from {}) of {}/{}/{}", condorTicker.ticking ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
+        applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, !condorTicker.ticking));
+        ticksLogger.info("Sent: {}, {}, {}", tickerId, condorPrice);
+    }
+    
+    LocalDateTime lastTickCheck;
     /**
-     * Runs every N minutes (currently 1). Finds condors that haven't ticked since the last check and:
-     * <ol>
-     * <li>Removes them from the tickers to condors and condors to tickers index maps.
-     * <li>Removed them from the lastTicks map.
-     * <li>Re-requests market data for the condor.
-     * </ol>
+     * Runs every N minutes (currently 1). Finds condors that haven't ticked since the last check and 
+     * tries to calculate the condor price from the option legs.
      */
     private synchronized void findNonTickingCondors() {
-        List<Integer> nonTicking = lastTicks.keySet().stream().
-                filter( ticker -> lastTicks.get(ticker).isBefore(LocalDateTime.now().minus(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES))).toList();
-        for( Integer ticker : nonTicking ) {
-            lastTicks.remove(ticker);
-            IronCondor<? extends Option> forCondor = tickersToCondor.remove(ticker);
-            if (forCondor != null) {
-                condorToTicker.remove(forCondor.toString());
-                requestCondorMarketData(forCondor);
+        if( lastTickCheck != null ) {
+            if( condorTicker.lastTick.isBefore(lastTickCheck) ) {
+                condorTicker.ticking = false;
+                condorTicker.condor.calculatePriceFromLegs();
             }
         }
-        logger.warn("Non-ticking condors: {}", nonTicking);
+        lastTickCheck = LocalDateTime.now();
     }
     
-    double highBandStrike, lowBandStrike;
+    private double highBandStrike, lowBandStrike;
 
     /**
      * Returns whether or not the condor bands have changed.
@@ -237,8 +300,8 @@ public class CondorProvider {
     private boolean subscribeToCondor() {
         // We don't calculate new condors if we're actively trading (unless we don't
         // have a condor at all yet)
-        if (TradingDays.inActiveTradingTime() && condorTickerId.get() >= 0) {
-            logger.debug("Keeping old condor--in active trading hours.");
+        if (TradingDays.inActiveTradingTime() && condorTicker != null) {
+            logger.info("Keeping old condor--in active trading hours.");
             return false;
         }
 
@@ -248,11 +311,12 @@ public class CondorProvider {
         Option longPut = addOptionToSubscribe(lowBandStrike - 10, 'P', true);
 
         if (longCall == null || shortCall == null || longPut == null || shortPut == null) {
-            logger.debug("Keeping old condor--invalid condor (one or more options missing from chain).");
+            logger.info("Keeping old condor--invalid condor (one or more options missing from chain).");
             return false;
         }
 
-        IronCondor<? extends Option> condor = client.buildIronCondor(longCall, shortCall, shortPut, longPut, quantity);
+        //Quantity for pricing is always 1--quantity is only significant for trading.
+        IronCondor<? extends Option> condor = client.buildIronCondor(longCall, shortCall, shortPut, longPut, (short)1);
         condor.setUnderlying(spxPriceProvider.getSPX());
 
         applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
@@ -267,102 +331,64 @@ public class CondorProvider {
         Option option = optionChainProvider.getOptionChain().get(key);
         if (option == null) {
             logger.warn("Could not find condor option in chain: strike: {}, P/C: {}, L/S: {}, key: {}", strike, putOrCall, isLong ? "long" : "short", key);
+            requestMissingOptionContractInfo(putOrCall, strike, isLong);
             return null;
         }
         option.setLong(isLong);
 
         return option;
     }
-
-    private class TickerTimestamp implements Comparable<TickerTimestamp> {
-        public TickerTimestamp(int tickerId, LocalDateTime timestamp) {
-            this.tickerId = tickerId;
-            this.timestamp = timestamp;
-        }
-
-        int tickerId;
-        LocalDateTime timestamp;
-
-        @Override
-        public int compareTo(TickerTimestamp tt) {
-            return this.timestamp.compareTo(tt.timestamp);
-        }
+    
+    //Try to get contract information for currently missing option--maybe it started 
+    //trading after we got contract info?
+    private void requestMissingOptionContractInfo( char putOrCall, double strike, boolean isLong ) {
+        Option option = client.getEmptyVendorSpecificOption();
+        option.setPutOrCall(putOrCall);
+        option.setExpirationDate(expDate);
+        option.setStrike(strike);
+        option.setLong(isLong);
+        option.setUnderlying(spxPriceProvider.getSPX());
+        optionChainProvider.requestMissingOptionContractInfo(option);
     }
-
-    @Value("${condors.prices.max.tickers:20}")
-    private int MAX_NUMBER_OF_TICKERS;
-
-    private PriorityQueue<TickerTimestamp> tickerAges = new PriorityQueue<>();
-    private Map<Integer, TickerTimestamp> tickersToTimestamps = new HashMap<>();
 
     /**
-     * Should only be called when the condor changes (i.e, after a large-enough
-     * underlying move or a large-enough ATM implied vol move.
+     * Will be called whenever we get a new implied volatility, but will only resubscribe
+     * when the condor changes (i.e., when the implied vol or underlying price changes the
+     * strike band.)
      */
     private synchronized void requestCondorMarketData(IronCondor<? extends Option> condor) {
-        if (condorToTicker.containsKey(condor.toString())) {
-            logger.info("Already subscribed to market data for condor {}", condor);
-            condorTickerId.set(condorToTicker.get(condor.toString()));
-            ticksLogger.info("Current ticker (old): {}", condorTickerId.get());
-            // Update the timestamp, remove the old timestamp, and reinsert the new one into
-            // the priority queue
-            TickerTimestamp timestamp = tickersToTimestamps.get(condorTickerId.get());
-            if (timestamp != null) {
-                timestamp.timestamp = LocalDateTime.now();
-                tickerAges.remove(timestamp);
-                tickerAges.add(timestamp);
-            }
+        if( condorTicker != null ) {    //Do we already have a condor ticker?
+            if( condor.toString().equals(condorTicker.condor.toString()) ) {
+                logger.info("Already subscribed to market data for condor {}", condor);
+                ticksLogger.info("Current ticker (old): {}", condorTicker.tickerId);
+                return;
+            }            
+        }
+
+        if ( condor == null || condor.getLegs().size() == 0 ) {
+            logger.debug("Null or invalid condor {} (no legs); not requesting market data.", condor);
             return;
         }
 
-        if (condor.getLegs().size() == 0) {
-            logger.debug("Invalid condor {} (no legs); not requesting market data.", condor);
-            return;
+        //Cancel the previous condor ticker if there is one
+        if( condorTicker != null ) {
+            condorTicker.unsubscribe();
         }
+        //Then create a new one and subscribe to it.
+        condorTicker = new CondorTicker(condor);
+        condorTicker.subscribe();
 
-        // Then subscribe (and cancel the previous condor ticker)
-        condorTickerId.set(client.requestMarketData(condorTickerId.get(), condor, false));
-        lastTicks.put(condorTickerId.get(), LocalDateTime.now().minus(1, ChronoUnit.DAYS));
-        ticksLogger.info("Current ticker (new): {}", condorTickerId.get());
-        // Index the new ticker id.
-        condorToTicker.put(condor.toString(), condorTickerId.get());
-        tickersToCondor.put(condorTickerId.get(), condor);
-        TickerTimestamp timestamp = new TickerTimestamp(condorTickerId.get(), LocalDateTime.now());
-        tickerAges.add(timestamp);
-        tickersToTimestamps.put(condorTickerId.get(), timestamp);
+        logger.info("Subscribed on ticker {} for condor {} (leg tickers: {})", condorTicker.tickerId, condor, condorTicker.legsTickers);
 
-        // Only keep the most recent tickers (no more than MAX_NUMBER_OF_TICKERS)
-        if (tickersToCondor.size() > MAX_NUMBER_OF_TICKERS) {
-            TickerTimestamp tt = tickerAges.remove();
-            client.cancelMarketData(tt.tickerId);
-            var condorToRemove = tickersToCondor.remove(tt.tickerId);
-            if( condorToRemove == null ) {
-                logger.info("Old condor already reamoved for ticker {}", tt.tickerId);
-            } else {
-                String condorToRemoveString = condorToRemove.toString();
-                condorToTicker.remove(condorToRemoveString);
-                logger.info("Removed ticker {} for condor {} (timestamp of {}); there are now {} tickers in the age queue, {} in tickers map, {} in condors map.", tt.tickerId, condorToRemove,
-                        tt.timestamp, tickerAges.size(), tickersToCondor.size(), condorToTicker.size());
-            }
-        }
-
-        logger.info("Added ticker {} for condor {}\nThere are now {} tickers.", condorTickerId.get(), condor, tickersToCondor.size());
-
-    }
-
-    private void resetCondorTickers() {
-        for (int ticker : tickersToCondor.keySet()) {
-            client.cancelMarketData(ticker);
-        }
-        tickersToCondor.clear();
-        condorToTicker.clear();
-        tickersToTimestamps.clear();
-        tickerAges.clear();
     }
 
     public synchronized WireCondor getCurrentCondor() {
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
+        if( condorTicker == null ) {
+            logger.warn("No current condor.");
+        }
+        IronCondor<? extends Option> condor = condorTicker.condor;
         if (condor == null) {
+            logger.warn("No current condor.");
             return null;
         }
         var wireCondor = new WireCondor(condor);
@@ -370,17 +396,18 @@ public class CondorProvider {
     }
 
     public IronCondor<?> getCondor() {
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
-        return condor;
+        if( condorTicker == null ) {
+            return null;
+        }
+        return condorTicker.condor;
     }
 
     public synchronized WireFullCondor getCurrentFullCondor() {
-        IronCondor<? extends Option> condor = tickersToCondor.get(condorTickerId.get());
-        if (condor == null) {
+        if( condorTicker == null ) {
             return null;
         }
-        logger.debug("Sending full condor: current condor: {}", condor);
-        return new WireFullCondor(condor);
+        logger.debug("Sending full condor: current condor: {}", condorTicker.condor);
+        return new WireFullCondor(condorTicker.condor);
     }
 
 }

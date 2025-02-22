@@ -97,7 +97,7 @@ public class OptionChainPriceProvider {
         logger.info("Expiration to trade is {}", expDateForOption.toString());        
     }
 
-    public void requestQuoteOrSubscription(Option option) {
+    private void requestOneTimeQuote(Option option) {
         int currTickerId = client.requestMarketData(0, option, true);
         tickers.put(currTickerId, option);
 
@@ -112,7 +112,7 @@ public class OptionChainPriceProvider {
             option.getPrice().setBid(0.0);
             option.getPrice().setAsk(0.0);
             optionToGroupId.put(option, groupId);
-            requestQuoteOrSubscription(option);
+            requestOneTimeQuote(option);
         });
     }
 
@@ -135,6 +135,13 @@ public class OptionChainPriceProvider {
         client.requestStrikesAndExpirations(spxPriceProvider.getSPX());
     }
 
+    /**
+     * Handles the event fired when we receive <i>some</i> expirations and
+     * strikes--not necessarily all.
+     * 
+     * @param event {@link ReceivedExpirationsAndStrikeEvent} that holds the strikes
+     *              and expirations received.
+     */
     @EventListener
     private void onReceivedExpirationsAndStrikes(ReceivedExpirationsAndStrikeEvent event) {
         Set<String> expirations = event.getExpirations();
@@ -149,87 +156,23 @@ public class OptionChainPriceProvider {
         this.strikes.addAll(strikes);
     }
 
+    /**
+     * Handles the event fired when we're done getting all expirations and strikes.
+     * @param event {@link AllExpirationsAndStrikesReceivedEvent} that signals we've got all the expirations
+     */
     @EventListener
-    private void handleTick(TickReceivedEvent event) {
-        // Ignore weird -1 prices.
-        if (event.getPrice() < 0.0) {
-            logger.debug("Got weird -1 price for ticker {}, {} snapshot ticker, {}", event.getTickerId(), tickers.containsKey(event.getTickerId()) ? "is" : "is not", event.getPriceType());
-            return;
-        }
-        int ticker = event.getTickerId();
-        Option option = tickers.get(ticker);
-        logger.debug("Got tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
-        if (option == null || (event.getPriceType() != PriceType.BID && event.getPriceType() != PriceType.ASK)) {
-            return;
-        }
-        logger.debug("Processing tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
-        OptionPrice price = (OptionPrice) option.getPrice();
-        event.setPriceField(price);
-        
-        //Both bid and ask need to be set.
-        if( price.getBid() == 0.0 || price.getAsk() == 0.0 ) {
-            logger.debug("Not calculating imp vol, bid/ask: {}/{}", price.getBid(), price.getAsk());
-            return;
-        }
+    private void getContractDetailsForOptions(AllExpirationsAndStrikesReceivedEvent event) {
+        logger.info("Finished getting option chains.");
+        logger.info("Got all expirations (sorted): \n{}", expirations);
+        logger.info("Got all strikes: {}", strikes);
 
-        double priceForCalc = price.getLatestPrice();
-        logger.debug("On tick for {}, calculating vol for option {} with price of {}, midpoint {}, last {}, ticker id of {}", event.getPriceType(), priceForCalc, price.getMidpoint(), price.getLast(), ticker);
-        if (priceForCalc == 0.0 || Double.isNaN(priceForCalc)) {
-            logger.debug("No valid price for calc");
-            return;
-        }
-        int impVolTicker = client.startImpliedVolCalculation(option, priceForCalc, spxPriceProvider.getSPXLast());
-        logger.debug("Imp vol ticker/option: {}/{}", impVolTicker, option);
-        tickers.put(impVolTicker, option);
-    }
+        optionChain = new TreeMap<>();
+        getOptionInformation();
 
-    @EventListener
-    private synchronized void handleOptionImpVol(OptionImpVolAvailableEvent event) {
-        int ticker = event.getTickerId();// > IMP_VOL_FLAG ? event.getTickerId() - IMP_VOL_FLAG : event.getTickerId();
-        Option option = tickers.remove(ticker);
-        if (option == null) {
-            return;
-        }
-        logger.debug("Received implied vol of {} for ticker {}, option {}", event.getImpVol(), event.getTickerId(), option);
-        option.getPrice().setImpliedVolatility(event.getImpVol());
-
-        List<Option> group;
-        Integer groupId;
-
-        groupId = optionToGroupId.get(option);
-        if (groupId == null) { // Not part of a group
-            logger.warn("Got implied vol for no-group ticker/option {}--{}", ticker, option);
-            logger.warn("Dumping optionToGroupId:\n{}", optionToGroupId);
-            logger.warn("Dumping pendingGroups:\n{}", pendingGroups);
-            return;
-        }
-        logger.debug("Past null group check.");
-        OptionGroup optionGroup = pendingGroups.get(groupId);
-        group = optionGroup.options;
-        group.remove(option);
-        optionToGroupId.remove(option);
-        logger.debug("Removed option {} from group {}, {} left in group", option, groupId, optionGroup.options.size());
-        if (group.size() == 0) {
-            removeOptionSnapshotGroup(groupId);
-            logger.info("Found complete option group {}", groupId);
-            applicationEventPublisher.publishEvent(new OptionGroupImpVolComplete(this, groupId));
-        }
-
-        checkOldIncompleteOptionGroups();
+        logger.info("Got {} possible options (some do not trade).", this.optionChain.size());
+        requestContractDetailsForOptionChain();
     }
     
-    private void checkOldIncompleteOptionGroups() {
-        final LocalDateTime tenMinutesAgo = LocalDateTime.now().minus(10, ChronoUnit.MINUTES);
-        List<Integer> oldGroupIds = pendingGroups.keySet().stream().filter(currGroupId -> pendingGroups.get(currGroupId).created.isBefore(tenMinutesAgo)).toList();
-        for( Integer oldGroupId : oldGroupIds ) {
-            logger.info("Removing old group ID {}", oldGroupId);
-            removeOptionSnapshotGroup(oldGroupId);
-        }
-    }
-
-    private String optionChainKey(Option forOption) {
-        return forOption.getSymbol();
-    }
 
     private void getOptionInformation() {
         // Create all the optionChain and request contract details
@@ -248,18 +191,9 @@ public class OptionChainPriceProvider {
         }
         logger.info("Finished building empty option chain.");
     }
-
-    @EventListener
-    private void getContractDetailsForOptions(AllExpirationsAndStrikesReceivedEvent event) {
-        logger.info("Finished getting option chains.");
-        logger.info("Got all expirations (sorted): \n{}", expirations);
-        logger.info("Got all strikes: {}", strikes);
-
-        optionChain = new TreeMap<>();
-        getOptionInformation();
-
-        logger.info("Got {} possible options (some do not trade).", this.optionChain.size());
-        requestContractDetailsForOptionChain();
+    
+    private String optionChainKey(Option forOption) {
+        return forOption.getSymbol();
     }
 
     Map<Integer, Option> pendingContractRequestIds = new HashMap<>();
@@ -300,6 +234,136 @@ public class OptionChainPriceProvider {
         List<String> unknowns = optionChain.keySet().stream().filter(key -> optionChain.get(key).getVendorContractInformation() == null).toList();
         // Then delete all of them
         optionChain.keySet().removeAll(unknowns);
+    }
+
+
+    /**
+     * This method handles option ticks, <i>only</i> for imp-vol calculations. An option must
+     * have bid and ask before it can do the implied vol calc; if it does, we request the
+     * imp-vol calc for the option.
+     * @param event
+     */
+    @EventListener
+    private void handleTick(TickReceivedEvent event) {
+        // Ignore weird -1 prices.
+        if (event.getPrice() < 0.0) {
+            logger.debug("Got weird -1 price for ticker {}, {} snapshot ticker, {}", event.getTickerId(), tickers.containsKey(event.getTickerId()) ? "is" : "is not", event.getPriceType());
+            return;
+        }
+        int ticker = event.getTickerId();
+        Option option = tickers.get(ticker);
+        logger.debug("Got tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
+        if (option == null || (event.getPriceType() != PriceType.BID && event.getPriceType() != PriceType.ASK)) {
+            return;
+        }
+        logger.debug("Processing tick for ticker {}, price: {} {}", ticker, event.getPriceType(), event.getPrice());
+        OptionPrice price = (OptionPrice) option.getPrice();
+        event.setPriceField(price);
+        
+        //Both bid and ask need to be set.
+        if( price.getBid() == 0.0 || price.getAsk() == 0.0 ) {
+            logger.debug("Not calculating imp vol, bid/ask: {}/{}", price.getBid(), price.getAsk());
+            return;
+        }
+
+        double priceForCalc = price.getLatestPrice();
+        logger.debug("On tick for {}, calculating vol for option {} with price of {}, midpoint {}, last {}, ticker id of {}", event.getPriceType(), priceForCalc, price.getMidpoint(), price.getLast(), ticker);
+        if (priceForCalc == 0.0 || Double.isNaN(priceForCalc)) {
+            logger.debug("No valid price for calc");
+            return;
+        }
+        int impVolTicker = client.startImpliedVolCalculation(option, priceForCalc, spxPriceProvider.getSPXLast());
+        logger.debug("Imp vol ticker/option: {}/{}", impVolTicker, option);
+        tickers.put(impVolTicker, option);
+    }
+
+    /**
+     * Receives the result of the imp-vol calc for a single option. If all the options in the group
+     * have returned imp vol, we remove the group and fire an {@link OptionGroupImpVolComplete} 
+     * event, which the {@link ImpliedVolatilityProvider} handles.
+     * 
+     * We also do a check for old (> 10 minutes) groups and delete them.
+     * @param event {@link OptionImpVolAvailableEvent} fired by low-level client
+     */
+    @EventListener
+    private synchronized void handleOptionImpVol(OptionImpVolAvailableEvent event) {
+        int ticker = event.getTickerId();// > IMP_VOL_FLAG ? event.getTickerId() - IMP_VOL_FLAG : event.getTickerId();
+        Option option = tickers.remove(ticker);
+        if (option == null) {
+            return;
+        }
+        logger.debug("Received implied vol of {} for ticker {}, option {}", event.getImpVol(), event.getTickerId(), option);
+        option.getPrice().setImpliedVolatility(event.getImpVol());
+
+        List<Option> group;
+        Integer groupId;
+
+        groupId = optionToGroupId.get(option);
+        if (groupId == null) { // Not part of a group
+            logger.warn("Got implied vol for no-group ticker/option {}--{}", ticker, option);
+            logger.warn("Dumping optionToGroupId:\n{}", optionToGroupId);
+            logger.warn("Dumping pendingGroups:\n{}", pendingGroups);
+            return;
+        }
+        logger.debug("Past null group check.");
+        OptionGroup optionGroup = pendingGroups.get(groupId);
+        group = optionGroup.options;
+        group.remove(option);
+        optionToGroupId.remove(option);
+        logger.debug("Removed option {} from group {}, {} left in group", option, groupId, optionGroup.options.size());
+        if (group.size() == 0) {
+            removeOptionSnapshotGroup(groupId);
+            logger.info("Found complete option group {}", groupId);
+            applicationEventPublisher.publishEvent(new OptionGroupImpVolComplete(this, groupId));
+        }
+
+        checkOldIncompleteOptionGroups();
+    }
+    
+    /**
+     * Check for old option groups (> 10 minutes) and delete them.
+     */
+    private void checkOldIncompleteOptionGroups() {
+        final LocalDateTime tenMinutesAgo = LocalDateTime.now().minus(10, ChronoUnit.MINUTES);
+        List<Integer> oldGroupIds = pendingGroups.keySet().stream().filter(currGroupId -> pendingGroups.get(currGroupId).created.isBefore(tenMinutesAgo)).toList();
+        for( Integer oldGroupId : oldGroupIds ) {
+            logger.info("Removing old group ID {}", oldGroupId);
+            removeOptionSnapshotGroup(oldGroupId);
+        }
+    }
+    
+    private Map<Integer, Option> missingOptionContractInfoRequests = new HashMap<>();
+    
+    /**
+     * We do this if an option is missing contract info after the initial contract
+     * info fetch--it might have started trading later in the day. 
+     * @param option The option that has no contract info and is therefore not in the chain.
+     */
+    public void requestMissingOptionContractInfo(Option option) {
+        int reqId = client.requestPriceVendorSpecificInformation(option);
+        logger.info("Requested missing contract info for option {}/request id {}.", option, reqId);
+        missingOptionContractInfoRequests.put(reqId, option);
+    }
+    
+    /**
+     * If we have a request for missing contract info that matches the event, we 
+     * put the option into the chain. The contract info has already been set by
+     * the low-level handler that fired the {@link ContractInfoAvailableEvent}
+     * @param event
+     */
+    @EventListener
+    private void handleMissingOptionContractInfo(ContractInfoAvailableEvent event) {
+        Option option = missingOptionContractInfoRequests.remove(event.getReqId());
+        //This one is not a missing option request.
+        if( option == null ) {
+            return;
+        }
+        if( event.getContractDetails() != null ) {
+            logger.info("Got missing contract info for request id {}/{}.", event.getReqId(), option);
+            optionChain.put(optionChainKey(option), option);
+        } else {
+            logger.info("Could not get missing contract info for request id {}/{}.", event.getReqId(), option);
+        }
     }
 
     public Map<String, Option> getOptionChain() {

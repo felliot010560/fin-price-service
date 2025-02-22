@@ -1,16 +1,11 @@
 package com.aleatory.price.backend.messaging;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.PostConstruct;
 
-import org.fattails.domain.Option;
-import org.fattails.domain.Price;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +14,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
-import com.aleatory.common.domain.IronCondor;
 import com.aleatory.common.domain.WireCondor;
 import com.aleatory.common.domain.WireFullCondor;
 import com.aleatory.common.domain.WirePrice;
@@ -30,7 +24,6 @@ import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
 import com.aleatory.price.events.NewSPXPriceEvent;
-import com.aleatory.price.provider.CondorProvider;
 import com.aleatory.price.provider.SPXPriceProvider;
 
 /**
@@ -54,36 +47,14 @@ public class PriceBackendMessagingController {
     @Autowired
     private SPXPriceProvider spxPriceProvider;
 
-    @Autowired
-    private CondorProvider condorPriceProvider;
+//    @Autowired
+//    private CondorProvider condorPriceProvider;
 
     @Autowired
     @Qualifier("pricesScheduler")
     TaskScheduler pricesScheduler;
 
     private AtomicLong lastPriceSent = new AtomicLong();
-
-    @PostConstruct
-    private void sendPricesEvery10Seconds() {
-        pricesScheduler.scheduleAtFixedRate(() -> {
-            boolean lastTick10SecondsOld = lastPriceSent.get() + 900l < System.currentTimeMillis();
-            if (lastTick10SecondsOld) {
-                logger.debug("Last price sent at {}, sending now at {}", Instant.ofEpochMilli(lastPriceSent.get()), Instant.now());
-                sendSPXPrice(null);
-                IronCondor<? extends Option> condor = condorPriceProvider.getCondor();
-                if (condor == null) {
-                    return;
-                }
-                NewCondorEvent event = new NewCondorEvent(this, condor);
-                sendCondor(event);
-                sendFullCondor(event);
-                Price price = condorPriceProvider.getCondorPrice();
-                NewCondorPriceEvent priceEvent = new NewCondorPriceEvent(this, price);
-                sendCondorPrice(priceEvent);
-            }
-        }, Instant.now().plus(10, ChronoUnit.SECONDS), Duration.of(10, ChronoUnit.SECONDS));
-
-    }
 
     @EventListener
     private void sendSPXPrice(NewSPXPriceEvent event) {
