@@ -43,7 +43,7 @@ public class CondorProvider {
     private static final Logger logger = LoggerFactory.getLogger(CondorProvider.class);
     private static Logger ticksLogger = LoggerFactory.getLogger("CONDORTICKSLOGGER");
     private static final double MINIMUM_VALID_BID = -10.0;
-    private static final long NON_TICKING_CONDORS_INTERVAL_SECONDS = 10;
+    private static final long NON_TICKING_CONDORS_INTERVAL_MINUTES = 1;
 
     @Autowired
     @Qualifier("pricesScheduler")
@@ -69,7 +69,7 @@ public class CondorProvider {
 
     private double impVol;
     
-    private ScheduledFuture<?> checkNonTickingTickersTask;
+    private ScheduledFuture<?> checkNonTickingCondorsTickerTask;
     
     private Map<Integer,Option> optionTickers = new HashMap<>();
     
@@ -125,17 +125,17 @@ public class CondorProvider {
     
     @EventListener(ConnectionUsableEvent.class)
     private void startNonTickingCondorsCheck() {
-        checkNonTickingTickersTask = scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
-                new Date( System.currentTimeMillis() + 60000 ).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_SECONDS, ChronoUnit.SECONDS));
+        checkNonTickingCondorsTickerTask = scheduler.scheduleAtFixedRate(() -> findNonTickingCondors(), 
+                new Date( System.currentTimeMillis() + 60000 ).toInstant(), Duration.of(NON_TICKING_CONDORS_INTERVAL_MINUTES, ChronoUnit.MINUTES));
     }
     
     @EventListener(ConnectionClosedEvent.class)
     private void connectionClosed() {
         logger.info("Connection to trading API closed; resetting condor tickers.");
         condorTicker = null;
-        if( checkNonTickingTickersTask != null ) {
-            checkNonTickingTickersTask.cancel(true);
-            checkNonTickingTickersTask = null;
+        if( checkNonTickingCondorsTickerTask != null ) {
+            checkNonTickingCondorsTickerTask.cancel(true);
+            checkNonTickingCondorsTickerTask = null;
         }
     }
 
@@ -216,7 +216,7 @@ public class CondorProvider {
 
         // Don't send bullshit prices
         if (bid != 0.0 && ask != 0.0 && !(bid >= ask)) {
-            publishNewCondorTick(event.getTickerId(), condorPrice);
+            publishNewCondorTick(event.getTickerId(), condorPrice, false);
         }
         condorTicker.lastTick = LocalDateTime.now();
         condorTicker.ticking = true;
@@ -237,34 +237,33 @@ public class CondorProvider {
         event.setPriceField(option.getPrice());
         logger.info("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
-        //We need to send the option-legs-based price.
-        if( !condorTicker.ticking ) {
-            condorTicker.condor.calculatePriceFromLegs();
-            publishNewCondorTick(event.getTickerId(), getCondorPrice());
-        }
+        condorTicker.condor.calculatePriceFromLegs();
+        publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
+
         List<Double> legPrices = condorTicker.condor.getLegs().stream().map( leg -> leg.getPrice().getMidpoint() ).toList();
         logger.info( "Leg prices: {}", legPrices );
     }
     
-    private void publishNewCondorTick( Integer tickerId, Price condorPrice ) {
-        if( !condorTicker.ticking ) {
+    private void publishNewCondorTick( Integer tickerId, Price condorPrice, boolean fromLegs ) {
+        if( fromLegs ) {
             logger.info("From legs.");
         }
-        logger.info("Sending condor tick (from {}) of {}/{}/{}", condorTicker.ticking ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
-        applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, !condorTicker.ticking));
+        logger.info("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
+        applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, fromLegs));
         ticksLogger.info("Sent: {}, {}, {}", tickerId, condorPrice);
     }
     
     LocalDateTime lastTickCheck;
     /**
      * Runs every N minutes (currently 1). Finds condors that haven't ticked since the last check and 
-     * tries to calculate the condor price from the option legs.
+     * marks it non-ticking and reports it in the log. Presumably we'll get option ticks on the legs
+     * to fill in.
      */
     private synchronized void findNonTickingCondors() {
         if( lastTickCheck != null ) {
             if( condorTicker.lastTick.isBefore(lastTickCheck) ) {
                 condorTicker.ticking = false;
-                condorTicker.condor.calculatePriceFromLegs();
+                logger.info("Condor ticker not ticking.");
             }
         }
         lastTickCheck = LocalDateTime.now();
