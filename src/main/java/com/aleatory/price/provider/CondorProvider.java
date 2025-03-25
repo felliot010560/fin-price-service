@@ -186,8 +186,10 @@ public class CondorProvider {
             subscribeToCondor();
         } else {
             // Send out the existing condor even if it doesn't change
-            IronCondor<? extends Option> condor = condorTicker.condor;
-            applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
+            if( condorTicker != null ) {
+                IronCondor<? extends Option> condor = condorTicker.condor;
+                applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
+            }
         }
     }
 
@@ -260,7 +262,7 @@ public class CondorProvider {
      * to fill in.
      */
     private synchronized void findNonTickingCondors() {
-        if( lastTickCheck != null ) {
+        if( lastTickCheck != null && condorTicker != null ) {
             if( condorTicker.lastTick.isBefore(lastTickCheck) ) {
                 condorTicker.ticking = false;
                 logger.info("Condor ticker not ticking.");
