@@ -216,13 +216,12 @@ public class CondorProvider {
             condorPrice.setAsk(ask);
         }
 
-        // Don't send bullshit prices
-        if (bid != 0.0 && ask != 0.0 && !(bid >= ask)) {
+        if( condorTickValid(bid, ask)) {
             publishNewCondorTick(event.getTickerId(), condorPrice, false);
+            condorTicker.lastTick = LocalDateTime.now();
+            condorTicker.ticking = true;
+            logger.info("Set condor price to {}/{}/{}", condorPrice, event.getPriceType(), event.getPrice());
         }
-        condorTicker.lastTick = LocalDateTime.now();
-        condorTicker.ticking = true;
-        logger.info("Set condor price to {}/{}/{}", condorPrice, event.getPriceType(), event.getPrice());
     }
     
     @EventListener
@@ -237,19 +236,20 @@ public class CondorProvider {
             return;
         }
         event.setPriceField(option.getPrice());
-        logger.info("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
+        logger.debug("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
         condorTicker.condor.calculatePriceFromLegs();
-        publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
-
-        List<Double> legPrices = condorTicker.condor.getLegs().stream().map( leg -> leg.getPrice().getMidpoint() ).toList();
-        logger.info( "Leg prices: {}", legPrices );
+        if( condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
+            publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
+        }
+    }
+    
+    //Don't send bullshit prices.
+    private boolean condorTickValid(double bid, double ask) {
+        return bid <= ask && bid < 0.0 && ask < 0.0 && bid >= -10.0 && ask >= -10.0;
     }
     
     private void publishNewCondorTick( Integer tickerId, Price condorPrice, boolean fromLegs ) {
-        if( fromLegs ) {
-            logger.info("From legs.");
-        }
         logger.info("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
         applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, fromLegs));
         ticksLogger.info("Sent: {}, {}, {}", tickerId, condorPrice);
