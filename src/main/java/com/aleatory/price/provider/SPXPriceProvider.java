@@ -1,6 +1,10 @@
 package com.aleatory.price.provider;
 
+import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
+import java.util.concurrent.ScheduledFuture;
 
 import javax.annotation.PostConstruct;
 
@@ -9,8 +13,11 @@ import org.fattails.domain.Stock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
@@ -19,6 +26,7 @@ import com.aleatory.common.events.ConnectionUsableEvent;
 import com.aleatory.common.events.ContractInfoAvailableEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
+import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.NewSPXPriceEvent;
 import com.aleatory.price.events.SPXContractValidEvent;
 import com.aleatory.price.events.SPXExternalTickReceivedEvent;
@@ -27,12 +35,23 @@ import com.aleatory.price.events.SPXExternalTickReceivedEvent;
 public class SPXPriceProvider {
     private static final Logger logger = LoggerFactory.getLogger(SPXPriceProvider.class);
     private static Logger spxLogger = LoggerFactory.getLogger("SPXLOGGER");
+    
+    private static final String REDIS_KEY = "CONDORS:LAST.MESSAGES";
+    //How often (in seconds) to send last SPX price during trading.
+    private static final int SEND_INTERVAL_DURING_TRADING = 5;
 
     @Autowired
     private ApplicationEventPublisher applicationEventPublisher;
 
     @Autowired
     private PricingAPIClient client;
+    
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @Autowired
+    @Qualifier("pricesScheduler")
+    private TaskScheduler scheduler;
 
     private Stock spx;
 
@@ -50,6 +69,33 @@ public class SPXPriceProvider {
 
         spxPrice = new Price();
         spxPrice.setSecurity(spx);
+        
+        //Get SPX last price and change from Redis cache
+        WirePrice wireSPXPrice = (WirePrice)redisTemplate.opsForHash().get(REDIS_KEY, "/topic/prices.spx");
+        if( wireSPXPrice != null ) {
+            wireSPXPrice.populatePrice(spxPrice);
+        }
+        
+        
+        scheduleSPXSend();
+    }
+    
+    private ScheduledFuture<?> sPXSendFuture;
+    
+    //Schedule sending the SPX price every 5 seconds during the next trading time (so trading service has it)
+    private void scheduleSPXSend() {
+        ZonedDateTime nextTradingStart = TradingDays.getTodaysOrNextTradingStartTime();
+        //15 minutes would be fine, but there'd be a chance of recursively scheduling on the same day.
+        ZonedDateTime nextTradingEnd = nextTradingStart.plus(16, ChronoUnit.MINUTES);
+        logger.info("Scheduling SPX sending every 5 seconds from {} to {}", nextTradingStart, nextTradingEnd);
+        sPXSendFuture = scheduler.scheduleAtFixedRate( () -> {
+            logger.info("Sending last SPX price during trading.");
+            applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
+            if( ZonedDateTime.now().isAfter(nextTradingEnd)) {
+                sPXSendFuture.cancel(false);
+                scheduleSPXSend();
+            }
+        }, nextTradingStart.toInstant(), Duration.of(SEND_INTERVAL_DURING_TRADING, ChronoUnit.SECONDS) );
     }
 
     @EventListener(ConnectionUsableEvent.class)

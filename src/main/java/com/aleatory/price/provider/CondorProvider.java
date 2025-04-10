@@ -102,7 +102,7 @@ public class CondorProvider {
                 legsTickers.add(ticker);
                 optionTickers.put(ticker, leg);
             });
-            logger.info("Subscribed to {}, leg tickers: {}", condor, legsTickers);
+            logger.debug("Subscribed to {}, leg tickers: {}", condor, legsTickers);
 
         }
 
@@ -220,7 +220,7 @@ public class CondorProvider {
             publishNewCondorTick(event.getTickerId(), condorPrice, false);
             condorTicker.lastTick = LocalDateTime.now();
             condorTicker.ticking = true;
-            logger.info("Set condor price to {}/{}/{}", condorPrice, event.getPriceType(), event.getPrice());
+            logger.debug("Set condor price to {}/{}/{}", condorPrice, event.getPriceType(), event.getPrice());
         }
     }
     
@@ -250,9 +250,9 @@ public class CondorProvider {
     }
     
     private void publishNewCondorTick( Integer tickerId, Price condorPrice, boolean fromLegs ) {
-        logger.info("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
+        logger.debug("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
         applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, fromLegs));
-        ticksLogger.info("Sent: {}, {}, {}", tickerId, condorPrice);
+        ticksLogger.debug("Sent: {}, {}, {}", tickerId, condorPrice);
     }
     
     LocalDateTime lastTickCheck;
@@ -265,7 +265,7 @@ public class CondorProvider {
         if( lastTickCheck != null && condorTicker != null ) {
             if( condorTicker.lastTick.isBefore(lastTickCheck) ) {
                 condorTicker.ticking = false;
-                logger.info("Condor ticker not ticking.");
+                logger.debug("Condor ticker not ticking.");
             }
         }
         lastTickCheck = LocalDateTime.now();
@@ -360,7 +360,7 @@ public class CondorProvider {
     private synchronized void requestCondorMarketData(IronCondor<? extends Option> condor) {
         if( condorTicker != null ) {    //Do we already have a condor ticker?
             if( condor.toString().equals(condorTicker.condor.toString()) ) {
-                logger.info("Already subscribed to market data for condor {}", condor);
+                logger.debug("Already subscribed to market data for condor {}", condor);
                 ticksLogger.info("Current ticker (old): {}", condorTicker.tickerId);
                 return;
             }            
@@ -379,7 +379,7 @@ public class CondorProvider {
         condorTicker = new CondorTicker(condor);
         condorTicker.subscribe();
 
-        logger.info("Subscribed on ticker {} for condor {} (leg tickers: {})", condorTicker.tickerId, condor, condorTicker.legsTickers);
+        logger.debug("Subscribed on ticker {} for condor {} (leg tickers: {})", condorTicker.tickerId, condor, condorTicker.legsTickers);
 
     }
 
