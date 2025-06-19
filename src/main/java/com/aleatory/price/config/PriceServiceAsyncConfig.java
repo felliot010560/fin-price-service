@@ -27,5 +27,12 @@ public class PriceServiceAsyncConfig implements AsyncConfigurer {
         scheduler.setPoolSize(10);
         return scheduler;
     }
+    
+    @Bean
+    public Executor messagingExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);
+        return executor;
+    }
 
 }

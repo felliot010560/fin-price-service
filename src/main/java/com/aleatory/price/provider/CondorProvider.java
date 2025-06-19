@@ -30,6 +30,7 @@ import com.aleatory.common.domain.WireFullCondor;
 import com.aleatory.common.domain.WirePrice;
 import com.aleatory.common.events.ConnectionClosedEvent;
 import com.aleatory.common.events.ConnectionUsableEvent;
+import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.common.util.TradingDays;
@@ -72,6 +73,8 @@ public class CondorProvider {
     private ScheduledFuture<?> checkNonTickingCondorsTickerTask;
     
     private Map<Integer,Option> optionTickers = new HashMap<>();
+    
+    private boolean stopCalculatingCondorPrice;
     
     class CondorTicker {
         private int tickerId = 0;
@@ -226,8 +229,8 @@ public class CondorProvider {
     
     @EventListener
     private void handleOptionTick(TickReceivedEvent event) {
-        //Don't handle if we're not handling condor ticks yet.
-        if (condorTicker == null ) {
+        //Don't handle if we're not handling condor ticks yet or if condor calculation is stopped.
+        if ( condorTicker == null ) {
             return;
         }
         //Don't handle if it's not a leg option tick
@@ -239,7 +242,7 @@ public class CondorProvider {
         logger.debug("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
         condorTicker.condor.calculatePriceFromLegs();
-        if( condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
+        if( !stopCalculatingCondorPrice && condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
             publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
         }
     }
@@ -409,6 +412,11 @@ public class CondorProvider {
         }
         logger.debug("Sending full condor: current condor: {}", condorTicker.condor);
         return new WireFullCondor(condorTicker.condor);
+    }
+    
+    @EventListener
+    public void stopCalculatingHandler( StopCalculatedPricesEvent event ) {
+        stopCalculatingCondorPrice = event.isStop();
     }
 
 }

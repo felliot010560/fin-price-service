@@ -86,6 +86,9 @@ public class InteractiveBrokersAPIClient extends AbstractIBListener implements P
             return;
         }
         security.setIbContractDetails(contractDetails);
+        if( !security.getSymbol().equals("SPX") && !contractDetails.contract().tradingClass().equals("SPXW") ) {
+            logger.warn("Got contract that is not SPXW:\n{}", contractDetails.contract());
+        }
         ContractInfoAvailableEvent event = new ContractInfoAvailableEvent(this, reqId, contractDetails);
         applicationEventPublisher.publishEvent(event);
     }
