@@ -229,10 +229,12 @@ public class CondorProvider {
     
     @EventListener
     private void handleOptionTick(TickReceivedEvent event) {
-        //Don't handle if we're not handling condor ticks yet or if condor calculation is stopped.
-        if ( condorTicker == null ) {
+        //Don't handle if we're not handling condor ticks yet or if condor calculation 
+        //is stopped (we're not using calculated prices from legs)
+        if ( condorTicker == null || stopCalculatingCondorPrice ) {
             return;
         }
+
         //Don't handle if it's not a leg option tick
         Option option = optionTickers.get(event.getTickerId());
         if( option == null ) {
@@ -242,7 +244,7 @@ public class CondorProvider {
         logger.debug("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
         condorTicker.condor.calculatePriceFromLegs();
-        if( !stopCalculatingCondorPrice && condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
+        if( condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
             publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
         }
     }
@@ -253,7 +255,7 @@ public class CondorProvider {
     }
     
     private void publishNewCondorTick( Integer tickerId, Price condorPrice, boolean fromLegs ) {
-        logger.debug("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
+        logger.info("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
         applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, fromLegs));
         ticksLogger.debug("Sent: {}, {}, {}", tickerId, condorPrice);
     }
