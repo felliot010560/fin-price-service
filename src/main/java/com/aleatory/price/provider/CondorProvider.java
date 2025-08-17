@@ -33,7 +33,6 @@ import com.aleatory.common.events.ConnectionUsableEvent;
 import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
-import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
@@ -179,6 +178,10 @@ public class CondorProvider {
 
     @EventListener
     private void handleNewImpliedVolatility(NewImpliedVolatilityEvent event) {
+        if( stopCalculatingCondorPrice ) {      //Should never happen, but...
+            logger.warn("Got new implied volatility event after stop-calculation message. Ignoring.");
+            return;
+        }
         impVol = event.getImpliedVolatility();
         if (calculateCondorBands(impVol)) {
             logger.info("At SPX price of {} and implied vol of {}, strike band is ({}, {})", spxPriceProvider.getSPXLast(), impVol, lowBandStrike, highBandStrike);
@@ -188,6 +191,7 @@ public class CondorProvider {
             }
             subscribeToCondor();
         } else {
+            logger.info("Condor bands unchanged, condor is {}.", condorTicker.condor);
             // Send out the existing condor even if it doesn't change
             if( condorTicker != null ) {
                 IronCondor<? extends Option> condor = condorTicker.condor;
@@ -257,7 +261,7 @@ public class CondorProvider {
     private void publishNewCondorTick( Integer tickerId, Price condorPrice, boolean fromLegs ) {
         logger.info("Sending condor tick (from {}) of {}/{}/{}", !fromLegs ? "condor itself" : "legs", condorPrice.getBid(), condorPrice.getAsk(), condorPrice.getMidpoint());
         applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorPrice, fromLegs));
-        ticksLogger.debug("Sent: {}, {}, {}", tickerId, condorPrice);
+        ticksLogger.debug("Sent: {}, {}, from-legs: {}", tickerId, condorPrice, fromLegs);
     }
     
     LocalDateTime lastTickCheck;
@@ -306,8 +310,8 @@ public class CondorProvider {
     private boolean subscribeToCondor() {
         // We don't calculate new condors if we're actively trading (unless we don't
         // have a condor at all yet)
-        if (TradingDays.inActiveTradingTime() && condorTicker != null) {
-            logger.info("Keeping old condor--in active trading hours.");
+        if (stopCalculatingCondorPrice && condorTicker != null) {
+            logger.info("Keeping old condor--condor calculations stopped.");
             return false;
         }
 
@@ -365,14 +369,14 @@ public class CondorProvider {
     private synchronized void requestCondorMarketData(IronCondor<? extends Option> condor) {
         if( condorTicker != null ) {    //Do we already have a condor ticker?
             if( condor.toString().equals(condorTicker.condor.toString()) ) {
-                logger.debug("Already subscribed to market data for condor {}", condor);
+                logger.warn("Already subscribed to market data for condor {}", condor);
                 ticksLogger.info("Current ticker (old): {}", condorTicker.tickerId);
                 return;
             }            
         }
 
         if ( condor == null || condor.getLegs().size() == 0 ) {
-            logger.debug("Null or invalid condor {} (no legs); not requesting market data.", condor);
+            logger.warn("Null or invalid condor {} (no legs); not requesting market data.", condor);
             return;
         }
 

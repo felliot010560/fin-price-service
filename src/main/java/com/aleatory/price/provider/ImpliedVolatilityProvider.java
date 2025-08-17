@@ -28,6 +28,7 @@ import org.springframework.stereotype.Component;
 
 import com.aleatory.common.events.ConnectionClosedEvent;
 import com.aleatory.common.events.ConnectionUsableEvent;
+import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.provider.IdProvider;
 import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
@@ -60,6 +61,8 @@ public class ImpliedVolatilityProvider {
     private long lastImpVolCalc = 0;
     private double impVol;
 
+    private boolean stopCalculatingImpliedVol;
+
     @EventListener
     private void optionChainComplete(OptionChainCompleteEvent event) {
         this.optionChain = event.getOptionChain();
@@ -88,7 +91,7 @@ public class ImpliedVolatilityProvider {
         logger.info("Scheduling implied vol calcs at {} to run every {}", ZonedDateTime.now(), IMPLIED_VOL_CALC_EVERY);
 
         impliedVolCalcTask = scheduler.scheduleAtFixedRate(() -> {
-            if (TradingDays.inIndexTradingHours() || TradingDays.inTradingHours()) {
+            if ( !stopCalculatingImpliedVol && TradingDays.inTradingHours() ) {
                 logger.info("Calculating implied volatility, last was {} ms ago.", lastImpVolCalc == 0 ? 0 : System.currentTimeMillis() - lastImpVolCalc);
                 startImpliedVolatilityCalculation();
                 lastImpVolCalc = System.currentTimeMillis();
@@ -117,6 +120,12 @@ public class ImpliedVolatilityProvider {
 
     @EventListener
     private void optionGroupComplete(OptionGroupImpVolComplete event) {
+        // Could happen if we started fetching the option group, then got a
+        // stop-calculating event, then completed the options group
+        if (stopCalculatingImpliedVol) {
+            logger.warn("Completed option group {} after stop-calculating event seen; ignoring.", event.getGroupId() );
+            return;
+        }
         logger.info("Received complete event for option group {}", event.getGroupId());
         if (event.getGroupId() == groupIdForLastCalc) {
             calculateImpVolIfAllOptionPricesPresent();
@@ -246,5 +255,10 @@ public class ImpliedVolatilityProvider {
 
     public double getImpliedVolatility() {
         return impVol;
+    }
+    
+    @EventListener
+    public void stopCalculatingHandler( StopCalculatedPricesEvent event ) {
+        stopCalculatingImpliedVol = event.isStop();
     }
 }
