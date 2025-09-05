@@ -233,9 +233,8 @@ public class CondorProvider {
     
     @EventListener
     private void handleOptionTick(TickReceivedEvent event) {
-        //Don't handle if we're not handling condor ticks yet or if condor calculation 
-        //is stopped (we're not using calculated prices from legs)
-        if ( condorTicker == null || stopCalculatingCondorPrice ) {
+        //Don't handle if we're not handling condor ticks yet
+        if ( condorTicker == null ) {
             return;
         }
 
@@ -248,6 +247,16 @@ public class CondorProvider {
         logger.debug("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
         condorTicker.condor.calculatePriceFromLegs();
+        
+        //Don't publish the new price if we've gotten a condor tick and condor calculation 
+        //is stopped (we're not using calculated prices from legs)--we do send option quotes if
+        //the condor isn't ticking
+        if( condorTicker.ticking && stopCalculatingCondorPrice ) {
+            return;
+        }
+        if( stopCalculatingCondorPrice ) {
+            logger.info("Overriding stop-calculating; condor not ticking");
+        }
         if( condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
             publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
         }
@@ -274,7 +283,7 @@ public class CondorProvider {
         if( lastTickCheck != null && condorTicker != null ) {
             if( condorTicker.lastTick.isBefore(lastTickCheck) ) {
                 condorTicker.ticking = false;
-                logger.debug("Condor ticker not ticking.");
+                logger.info("Condor ticker not ticking.");
             }
         }
         lastTickCheck = LocalDateTime.now();
