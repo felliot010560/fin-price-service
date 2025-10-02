@@ -36,6 +36,7 @@ import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
+import com.aleatory.price.events.NewSPXPriceEvent;
 import com.aleatory.price.events.OptionChainCompleteEvent;
 
 @Component
@@ -74,6 +75,8 @@ public class CondorProvider {
     private Map<Integer,Option> optionTickers = new HashMap<>();
     
     private boolean stopCalculatingCondorPrice;
+    boolean optionChainComplete = false;
+
     
     class CondorTicker {
         private int tickerId = 0;
@@ -139,6 +142,7 @@ public class CondorProvider {
             checkNonTickingCondorsTickerTask.cancel(true);
             checkNonTickingCondorsTickerTask = null;
         }
+        optionChainComplete = false;
     }
 
     public synchronized WirePrice getCondorWirePrice() {
@@ -163,9 +167,10 @@ public class CondorProvider {
 
         return condorPrice;
     }
-
+    
     @EventListener
     private void optionChainComplete(OptionChainCompleteEvent event) {
+        optionChainComplete = true;
         this.expDate = event.getExpDate();
         logger.debug("Got option chain complete, setting exp date to {}", expDate);
         if (event.getOptionChain().size() == 0) {
@@ -183,7 +188,17 @@ public class CondorProvider {
             return;
         }
         impVol = event.getImpliedVolatility();
-        if (calculateCondorBands(impVol)) {
+        spxPriceProvider.setSPXImpVol(impVol);
+        logger.info("Calculated SPX 7-day implied vol of {}", impVol);
+        checkForNewCondor();
+    }
+    
+    private void checkForNewCondor() {
+        if( !optionChainComplete || stopCalculatingCondorPrice ) {
+            logger.info("Not checking for new condor during trading/startup.");
+            return;
+        }
+        if (calculateCondorBands()) {
             logger.info("At SPX price of {} and implied vol of {}, strike band is ({}, {})", spxPriceProvider.getSPXLast(), impVol, lowBandStrike, highBandStrike);
             if (Double.isInfinite(lowBandStrike) || Double.isInfinite(highBandStrike)) {
                 logger.warn("Got infinite strike band, discarding.");
@@ -191,7 +206,7 @@ public class CondorProvider {
             }
             subscribeToCondor();
         } else {
-            logger.info("Condor bands unchanged, condor is {}.", condorTicker.condor);
+            logger.info("Condor bands unchanged, condor is {}.", condorTicker !=  null ? condorTicker.condor : "undefined--no ticker");
             // Send out the existing condor even if it doesn't change
             if( condorTicker != null ) {
                 IronCondor<? extends Option> condor = condorTicker.condor;
@@ -262,6 +277,12 @@ public class CondorProvider {
         }
     }
     
+    @EventListener(NewSPXPriceEvent.class)
+    private void handleSPXTick() {
+        logger.info("Checking for new condor after SPX tick.");
+        checkForNewCondor();
+    }
+    
     //Don't send bullshit prices.
     private boolean condorTickValid(double bid, double ask) {
         return bid <= ask && bid < 0.0 && ask < 0.0 && bid >= -10.0 && ask >= -10.0;
@@ -297,9 +318,7 @@ public class CondorProvider {
      * @param impVol the current implied vol
      * @return whether or not the condor bands have change
      */
-    private boolean calculateCondorBands(double impVol) {
-        spxPriceProvider.setSPXImpVol(impVol);
-        logger.debug("Calculated SPX 7-day implied vol of {}", impVol);
+    private boolean calculateCondorBands() {
         double spxPrice = spxPriceProvider.getSPXLast();
         double lowBandStrikeNew = Math.floor((spxPrice - spxPrice * impVol) / 5) * 5;
         double highBandStrikeNew = Math.ceil((spxPrice + spxPrice * impVol) / 5) * 5;
