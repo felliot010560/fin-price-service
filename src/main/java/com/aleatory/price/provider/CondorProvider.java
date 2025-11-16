@@ -198,6 +198,10 @@ public class CondorProvider {
             logger.info("Not checking for new condor during trading/startup.");
             return;
         }
+        if( impVol == 0.0 ) {   //It hasn't been set
+            //logger.info("Implied vol of 0, not calculating condor band");
+            return;
+        }
         if (calculateCondorBands()) {
             logger.info("At SPX price of {} and implied vol of {}, strike band is ({}, {})", spxPriceProvider.getSPXLast(), impVol, lowBandStrike, highBandStrike);
             if (Double.isInfinite(lowBandStrike) || Double.isInfinite(highBandStrike)) {
@@ -277,9 +281,12 @@ public class CondorProvider {
         }
     }
     
-    @EventListener(NewSPXPriceEvent.class)
-    private void handleSPXTick() {
-        logger.info("Checking for new condor after SPX tick.");
+    @EventListener()
+    private void handleSPXTick(NewSPXPriceEvent event) {
+        if( event.getType() != PriceType.LAST ) {
+            return;
+        }
+        logger.info("Checking for new condor after SPX last tick.");
         checkForNewCondor();
     }
     

@@ -95,6 +95,8 @@ public class ImpliedVolatilityProvider {
                 logger.info("Calculating implied volatility, last was {} ms ago.", lastImpVolCalc == 0 ? 0 : System.currentTimeMillis() - lastImpVolCalc);
                 startImpliedVolatilityCalculation();
                 lastImpVolCalc = System.currentTimeMillis();
+            } else {
+                logger.info("Not doing imp vol calc because {}", stopCalculatingImpliedVol ? "implied vol calc stopped" : "not in trading hours" );
             }
         }, IMPLIED_VOL_CALC_EVERY);
     }
@@ -142,12 +144,12 @@ public class ImpliedVolatilityProvider {
         }
         List<Option> optionsToGetQuotesFor = getNOptionStrikesAboveAndNBelow(spxPriceProvider.getSPXLast(), 5);
         optionsToGetQuotesFor.stream().forEach((option) -> option.getPrice().setImpliedVolatility(0.0));
-        logger.debug("Requesting market data for {} options in chain", optionsToGetQuotesFor.size());
+        logger.info("Imp vol calc: Requesting market data for {} options in chain", optionsToGetQuotesFor.size());
 
         groupIdForLastCalc = idProvider.currOptionGroupIdIncrement();
-        logger.debug("Requesting options for option group {}", groupIdForLastCalc);
+        logger.info("Imp vol calc: Requesting options for option group {}", groupIdForLastCalc);
         optionChainProvider.requestOptionSnapshotGroup(groupIdForLastCalc, optionsToGetQuotesFor);
-        logger.debug("Requested {} snapshot quotes for imp vol calc.", optionsToGetQuotesFor.size());
+        logger.info("Imp vol calc: Requested {} snapshot quotes for imp vol calc.", optionsToGetQuotesFor.size());
     }
 
     /**
@@ -224,6 +226,7 @@ public class ImpliedVolatilityProvider {
         try {
             logger.debug("Checking if we have all prices for imp vol calc");
             if (!allATMOptionsHavePrices()) {
+                logger.info("Missing prices for imp vol calc--skipping");
                 return;
             }
             logger.info("Calculating implied volatility (all ATM options have imp vol).");

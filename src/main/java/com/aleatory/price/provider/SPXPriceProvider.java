@@ -29,7 +29,6 @@ import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.NewSPXPriceEvent;
 import com.aleatory.price.events.SPXContractValidEvent;
-import com.aleatory.price.events.SPXExternalTickReceivedEvent;
 
 @Component
 public class SPXPriceProvider {
@@ -90,7 +89,7 @@ public class SPXPriceProvider {
         logger.info("Scheduling SPX sending every 5 seconds from {} to {}", nextTradingStart, nextTradingEnd);
         sPXSendFuture = scheduler.scheduleAtFixedRate( () -> {
             logger.info("Sending last SPX price during trading.");
-            applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
+            applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this, PriceType.LAST, spxPrice.getLast()));
             if( ZonedDateTime.now().isAfter(nextTradingEnd)) {
                 sPXSendFuture.cancel(false);
                 scheduleSPXSend();
@@ -169,10 +168,9 @@ public class SPXPriceProvider {
             return;
         }
 
-        spxLogger.debug("SPX tick: {} of {} ", event.getPriceType(), event.getPrice());
+        spxLogger.info("SPX tick: {} of {} ", event.getPriceType(), event.getPrice());
 
-        applicationEventPublisher.publishEvent(new SPXExternalTickReceivedEvent(this, event.getPriceType(), event.getPrice()));
-        applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
+        applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this, event.getPriceType(), event.getPrice()));
     }
 
     @EventListener
@@ -181,7 +179,7 @@ public class SPXPriceProvider {
         String destination = headers.get("destination").toString();
         if ("[/topic/prices.spx]".equals(destination)) {
             logger.info("Got session subscribe event for topic [/topic/prices.spx]");
-            applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this));
+            applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this, PriceType.LAST, spxPrice.getLast()));
         }
     }
 
