@@ -74,7 +74,7 @@ public class ImpliedVolatilityProvider {
             logger.info("No options in chain. (Expiration {} {} a trading day.)", expiration, isTradingDay ? "is" : "is not");
             return;
         }
-        logger.info("Got option chain complete, calculating imp vol");
+        logger.info("Got option chain complete, scheduling imp vol calc");
 
         scheduleImpliedVolCalc();
 
@@ -86,6 +86,7 @@ public class ImpliedVolatilityProvider {
 
     private void scheduleImpliedVolCalc() {
         if (impliedVolCalcTask != null) {
+            logger.info("Cancelling old implied vol calc task to start new one.");
             impliedVolCalcTask.cancel(false);
         }
         logger.info("Scheduling implied vol calcs at {} to run every {}", ZonedDateTime.now(), IMPLIED_VOL_CALC_EVERY);
@@ -93,7 +94,11 @@ public class ImpliedVolatilityProvider {
         impliedVolCalcTask = scheduler.scheduleAtFixedRate(() -> {
             if ( !stopCalculatingImpliedVol && TradingDays.inTradingHours() ) {
                 logger.info("Calculating implied volatility, last was {} ms ago.", lastImpVolCalc == 0 ? 0 : System.currentTimeMillis() - lastImpVolCalc);
-                startImpliedVolatilityCalculation();
+                try {
+                    startImpliedVolatilityCalculation();
+                } catch (Exception e) {
+                    logger.warn("Got exception starting implied volatility calculation: ", e);
+                }
                 lastImpVolCalc = System.currentTimeMillis();
             } else {
                 logger.info("Not doing imp vol calc because {}", stopCalculatingImpliedVol ? "implied vol calc stopped" : "not in trading hours" );
@@ -107,6 +112,7 @@ public class ImpliedVolatilityProvider {
         logger.info("Connection to trading API closed; resetting all condor tickers.");
         optionChain = null;
         if( impliedVolCalcTask != null ) {
+            logger.info("Cancelling old implied vol calc task on connection closed event.");
             impliedVolCalcTask.cancel(true);
             impliedVolCalcTask = null;
         }
@@ -115,6 +121,7 @@ public class ImpliedVolatilityProvider {
     @EventListener(ConnectionUsableEvent.class)
     private void initOptionChain() {
         if( impliedVolCalcTask != null ) {
+            logger.info("Cancelling old implied vol calc task on connection usable event.");
             impliedVolCalcTask.cancel(true);
         }
         optionChain = null;
@@ -140,6 +147,7 @@ public class ImpliedVolatilityProvider {
     private void startImpliedVolatilityCalculation() {
         // Check for option chain not yet initialized.
         if (optionChain == null) {
+            logger.info("Not doing imp vol calc--option chain is null.");
             return;
         }
         List<Option> optionsToGetQuotesFor = getNOptionStrikesAboveAndNBelow(spxPriceProvider.getSPXLast(), 5);
