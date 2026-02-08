@@ -5,6 +5,7 @@ import static java.lang.Double.isNaN;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
@@ -63,6 +64,9 @@ public class ImpliedVolatilityProvider {
 
     private boolean stopCalculatingImpliedVol;
 
+    private static final long IMPLIED_VOL_CALC_DURATION_AMOUNT = 10;
+    private static final Duration IMPLIED_VOL_CALC_DEAD_DURATION = Duration.of(IMPLIED_VOL_CALC_DURATION_AMOUNT, ChronoUnit.MINUTES);
+
     @EventListener
     private void optionChainComplete(OptionChainCompleteEvent event) {
         this.optionChain = event.getOptionChain();
@@ -77,12 +81,27 @@ public class ImpliedVolatilityProvider {
         logger.info("Got option chain complete, scheduling imp vol calc");
 
         scheduleImpliedVolCalc();
+        
+        ZonedDateTime elevenMinutesFromNow = ZonedDateTime.now().plusMinutes(IMPLIED_VOL_CALC_DURATION_AMOUNT + 1);
+        logger.info("Scheduling impvol-dead check every {} starting at {}.", IMPLIED_VOL_CALC_DEAD_DURATION, elevenMinutesFromNow);
+        scheduler.scheduleAtFixedRate( () -> checkImpliedVolCalcRunning(), elevenMinutesFromNow.toInstant(), IMPLIED_VOL_CALC_DEAD_DURATION);
 
         lastImpVolCalc = System.currentTimeMillis();
     }
+    
+    private void checkImpliedVolCalcRunning() {
+        logger.info("Checking for imp vol calc running at {}.", LocalDateTime.now());
+        Duration sinceLastImpvol = Duration.of(System.currentTimeMillis() - lastImpVolCalc, ChronoUnit.MILLIS);
+        if( sinceLastImpvol.compareTo(IMPLIED_VOL_CALC_DEAD_DURATION) == 1 ) {
+            logger.info("Rescheduling imp vol calc--imp vol calc was dead.");
+            scheduleImpliedVolCalc();
+        } else {
+            logger.info("Not rescheduling imp vol calc--imp vol running.");
+        }
+    }
 
     private ScheduledFuture<?> impliedVolCalcTask;
-    private static final Duration IMPLIED_VOL_CALC_EVERY = Duration.of(10, ChronoUnit.SECONDS);
+    private static final Duration IMPLIED_VOL_CALC_EVERY = Duration.of(IMPLIED_VOL_CALC_DURATION_AMOUNT, ChronoUnit.SECONDS);
 
     private void scheduleImpliedVolCalc() {
         if (impliedVolCalcTask != null) {
@@ -150,7 +169,9 @@ public class ImpliedVolatilityProvider {
             logger.info("Not doing imp vol calc--option chain is null.");
             return;
         }
+        logger.info("Staring imp vol calc @{}, {} options in chain.", LocalDateTime.now(), optionChain.size());
         List<Option> optionsToGetQuotesFor = getNOptionStrikesAboveAndNBelow(spxPriceProvider.getSPXLast(), 5);
+        logger.info("Got stikes above and below.");
         optionsToGetQuotesFor.stream().forEach((option) -> option.getPrice().setImpliedVolatility(0.0));
         logger.info("Imp vol calc: Requesting market data for {} options in chain", optionsToGetQuotesFor.size());
 
