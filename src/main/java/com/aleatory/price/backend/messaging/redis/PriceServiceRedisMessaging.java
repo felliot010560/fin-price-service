@@ -24,7 +24,8 @@ public class PriceServiceRedisMessaging extends RedisPubSubMessagingOperations {
     }
 
     private void fireStopCalculated(Object payload) {
-        logger.info("Got stop calculated prices: {}", payload);
-        applicationEventPublisher.publishEvent(new StopCalculatedPricesEvent(this, (Boolean)payload));
+        logger.info("Got stop calculated prices event: {}", payload);
+        StopCalculatedPricesEvent event = (StopCalculatedPricesEvent)payload;
+        applicationEventPublisher.publishEvent(event);
     }
 }

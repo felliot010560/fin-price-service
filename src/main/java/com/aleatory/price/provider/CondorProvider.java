@@ -33,6 +33,7 @@ import com.aleatory.common.events.ConnectionUsableEvent;
 import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
+import com.aleatory.common.provider.PriceableSecurityFactory;
 import com.aleatory.price.events.NewCondorEvent;
 import com.aleatory.price.events.NewCondorPriceEvent;
 import com.aleatory.price.events.NewImpliedVolatilityEvent;
@@ -65,6 +66,9 @@ public class CondorProvider {
 
     @Autowired
     private SPXPriceProvider spxPriceProvider;
+    
+    @Autowired
+    private PriceableSecurityFactory securityFactory;
 
     private Date expDate;
 
@@ -263,7 +267,7 @@ public class CondorProvider {
             return;
         }
         event.setPriceField(option.getPrice());
-        logger.debug("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
+        logger.info("Set leg option price for {}/{}/{}", option, event.getPriceType(), event.getPrice());
         
         condorTicker.condor.calculatePriceFromLegs();
         
@@ -275,6 +279,11 @@ public class CondorProvider {
         }
         if( stopCalculatingCondorPrice ) {
             logger.info("Overriding stop-calculating; condor not ticking");
+        }
+
+        if( !condorTicker.condor.isLegsPriceCurrent() ) {
+            logger.info("Condor legs price was not current.");
+            return;
         }
         if( condorTickValid( condorTicker.condor.getPrice().getBid(), condorTicker.condor.getPrice().getAsk() )) {
             publishNewCondorTick(event.getTickerId(), getCondorPrice(), true);
@@ -455,8 +464,38 @@ public class CondorProvider {
         return new WireFullCondor(condorTicker.condor);
     }
     
+    /**
+     * To prevent the edge case where the pricing server sends a new-condor to the
+     * trading server, then sends another new condor, then gets a
+     * stop-calculating/trading-started event (I've seen it happen!), the trading
+     * server now sends us the condor it thinks it's trading, and we set the condor
+     * we're subscribing to to the trading server's condor.
+     * 
+     * If the trading server's condor is null (it never received a new-condor event,
+     * possibly because it just came up), we send a new-condor event to set it to
+     * the current condor, then an immediate tick event so it has a fresh price.
+     * 
+     * If the trading server's condor is null and ours is too, we're just SOL.
+     * 
+     * @param event
+     */
     @EventListener
     public void stopCalculatingHandler( StopCalculatedPricesEvent event ) {
+        if( event.isStop() ) {
+            //If the trading server has a condor, use that (it's the one the trading server is trading).
+            //If not (trading server has no condor), send the current condor to the trading server, then the current price.
+            WireFullCondor wireFullCondor = event.getTradingCondor();
+            if( wireFullCondor != null ) {
+                IronCondor<? extends Option> condor = securityFactory.buildCondorFromWireFullCondor(event.getTradingCondor());
+                requestCondorMarketData(condor);
+            } else if (condorTicker != null) {  //Trading server doesn't have a condor (or a price)
+                IronCondor<? extends Option> condor = condorTicker.condor;
+                applicationEventPublisher.publishEvent(new NewCondorEvent(this, condor));
+                if (condorTicker.condor != null) {
+                    applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorTicker.condor.getPrice(), false));
+                }
+            }
+        }
         stopCalculatingCondorPrice = event.isStop();
     }
 
