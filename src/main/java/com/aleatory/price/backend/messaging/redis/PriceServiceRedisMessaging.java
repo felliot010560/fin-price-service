@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import com.aleatory.common.events.StopCalculatedPriceData;
 import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.messaging.impl.redis.RedisPubSubMessagingOperations;
 
@@ -20,12 +21,14 @@ public class PriceServiceRedisMessaging extends RedisPubSubMessagingOperations {
     private ApplicationEventPublisher applicationEventPublisher;
 
     public PriceServiceRedisMessaging() {
-        handlers.put("/topic/prices.stop.calculated", (payload) -> fireStopCalculated(payload));
+        handlers.put("/topic/trading/prices.stop.calculated", (payload) -> fireStopCalculated(payload));
     }
 
     private void fireStopCalculated(Object payload) {
         logger.info("Got stop calculated prices event: {}", payload);
-        StopCalculatedPricesEvent event = (StopCalculatedPricesEvent)payload;
+        StopCalculatedPriceData data = (StopCalculatedPriceData)payload;
+        StopCalculatedPricesEvent event = new StopCalculatedPricesEvent(this, data);
+        logger.info("Stopping calculated prices: {}, setting curr condor to trading condor: {}", data.isStop(), data.getTradingCondor());
         applicationEventPublisher.publishEvent(event);
     }
 }

@@ -482,6 +482,7 @@ public class CondorProvider {
     @EventListener
     public void stopCalculatingHandler( StopCalculatedPricesEvent event ) {
         if( event.isStop() ) {
+            logger.info("On stop, ticker condor is: {}", condorTicker == null ? "null" : condorTicker.condor);
             //If the trading server has a condor, use that (it's the one the trading server is trading).
             //If not (trading server has no condor), send the current condor to the trading server, then the current price.
             WireFullCondor wireFullCondor = event.getTradingCondor();
@@ -495,6 +496,7 @@ public class CondorProvider {
                     applicationEventPublisher.publishEvent(new NewCondorPriceEvent(this, condorTicker.condor.getPrice(), false));
                 }
             }
+            logger.info("After stop processed, ticker condor is: {}", condorTicker.condor);
         }
         stopCalculatingCondorPrice = event.isStop();
     }

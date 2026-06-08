@@ -76,7 +76,7 @@ public class CacheConfig {
 
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
-        container.addMessageListener(messagingOperations, PatternTopic.of("/topic/prices.stop.calculated"));
+        container.addMessageListener(messagingOperations, PatternTopic.of("/topic/trading/prices.stop.calculated"));
         container.setTaskExecutor(messagingExecutor);
 
         return container;
