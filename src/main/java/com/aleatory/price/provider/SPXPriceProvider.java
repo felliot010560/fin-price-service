@@ -157,7 +157,7 @@ public class SPXPriceProvider {
         // Throw away anything but last. (We don't do anything with IBKR's close--we
         // fetch that ourselves, since IBKR's is kinda hosed.)
         if (event.getPriceType() != PriceType.LAST && event.getPriceType() != PriceType.CLOSE) {
-            spxLogger.debug("SPX tick: {} of {} ", event.getPriceType(), event.getPrice());
+            spxLogger.info("SPX tick (discarded): {} of {} ", event.getPriceType(), event.getPrice());
             return;
         }
         event.setPriceField(spxPrice);
