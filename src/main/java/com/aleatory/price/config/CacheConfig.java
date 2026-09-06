@@ -17,7 +17,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.scheduling.annotation.EnableAsync;
 
@@ -43,6 +42,7 @@ public class CacheConfig {
     
     @Bean
     public JedisConnectionFactory jedisConnectionFactory() {
+        logger.info("Will connect to Redis server on {}:{}", REDIS_HOSTNAME, REDIS_PORT);
         RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(REDIS_HOSTNAME, REDIS_PORT);
         configuration.setPassword(REDIS_PASSWORD);
         JedisClientConfiguration jedisClientConfiguration = JedisClientConfiguration.builder().build();
@@ -51,17 +51,18 @@ public class CacheConfig {
     }
 
     @Bean
+    @ConditionalOnProperty(value = "backend.messaging.transport", havingValue = "redis", matchIfMissing = true)
     public RedisTemplate<String, Object> redisTemplate(JedisConnectionFactory factory) {
-        logger.info("Connecting to Redis at {}:{}", REDIS_HOSTNAME, REDIS_PORT);
         final RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
-        redisTemplate.setHashKeySerializer(new StringRedisSerializer());
+        StringRedisSerializer keySerializer = new StringRedisSerializer();
+        redisTemplate.setHashKeySerializer(keySerializer);
 
         ObjectMapper mapper = JsonMapper.builder().addModule(new JavaTimeModule()).build();
         mapper.activateDefaultTyping(mapper.getPolymorphicTypeValidator(), ObjectMapper.DefaultTyping.NON_FINAL, JsonTypeInfo.As.PROPERTY);
         GenericJackson2JsonRedisSerializer valueSerializer = new GenericJackson2JsonRedisSerializer(mapper), defaultSerializer = new GenericJackson2JsonRedisSerializer(mapper);
         redisTemplate.setValueSerializer(valueSerializer);
         redisTemplate.setDefaultSerializer(defaultSerializer);
-        redisTemplate.setKeySerializer(new JdkSerializationRedisSerializer());
+        redisTemplate.setKeySerializer(keySerializer);
 
         factory.afterPropertiesSet();
         redisTemplate.setConnectionFactory(factory);
@@ -77,6 +78,7 @@ public class CacheConfig {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
         container.addMessageListener(messagingOperations, PatternTopic.of("/topic/trading/prices.stop.calculated"));
+        container.addMessageListener(messagingOperations, PatternTopic.of("/topic/prices.spx.last-close"));
         container.setTaskExecutor(messagingExecutor);
 
         return container;

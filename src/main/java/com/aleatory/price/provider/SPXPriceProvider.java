@@ -28,6 +28,7 @@ import com.aleatory.common.events.TickReceivedEvent;
 import com.aleatory.common.events.TickReceivedEvent.PriceType;
 import com.aleatory.common.util.TradingDays;
 import com.aleatory.price.events.NewSPXPriceEvent;
+import com.aleatory.price.events.SPXCloseReceivedEvent;
 import com.aleatory.price.events.SPXContractValidEvent;
 
 @Component
@@ -75,8 +76,13 @@ public class SPXPriceProvider {
             wireSPXPrice.populatePrice(spxPrice);
         }
         
-        
         scheduleSPXSend();
+    }
+    
+    @EventListener
+    private void setSPXClose(SPXCloseReceivedEvent event) {
+        spxPrice.setAdjustedClose(event.getClose());
+        applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this, PriceType.LAST, spxPrice.getLast()));
     }
     
     private ScheduledFuture<?> sPXSendFuture;
@@ -88,6 +94,7 @@ public class SPXPriceProvider {
         ZonedDateTime nextTradingEnd = nextTradingStart.plus(16, ChronoUnit.MINUTES);
         logger.info("Scheduling SPX sending every 5 seconds from {} to {}", nextTradingStart, nextTradingEnd);
         sPXSendFuture = scheduler.scheduleAtFixedRate( () -> {
+            
             logger.info("Sending last SPX price during trading.");
             applicationEventPublisher.publishEvent(new NewSPXPriceEvent(this, PriceType.LAST, spxPrice.getLast()));
             if( ZonedDateTime.now().isAfter(nextTradingEnd)) {
@@ -156,7 +163,7 @@ public class SPXPriceProvider {
 
         // Throw away anything but last. (We don't do anything with IBKR's close--we
         // fetch that ourselves, since IBKR's is kinda hosed.)
-        if (event.getPriceType() != PriceType.LAST && event.getPriceType() != PriceType.CLOSE) {
+        if (event.getPriceType() != PriceType.LAST) {
             spxLogger.info("SPX tick (discarded): {} of {} ", event.getPriceType(), event.getPrice());
             return;
         }

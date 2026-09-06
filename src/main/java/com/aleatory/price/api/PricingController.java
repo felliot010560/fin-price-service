@@ -3,9 +3,11 @@ package com.aleatory.price.api;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -17,9 +19,12 @@ import com.aleatory.price.services.PricingService;
 @RestController
 public class PricingController {
     private static final Logger logger = LoggerFactory.getLogger(PricingController.class);
-
+    private static final String REDIS_KEY = "CONDORS:LAST.MESSAGES";
     @Autowired
     private PricingService pricingService;
+    
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     @GetMapping("/condor")
     @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
@@ -50,6 +55,15 @@ public class PricingController {
     @ResponseBody
     public void restart() {
         IBPricingServiceApplication.restart(IBPricingServiceApplication.class);
+    }
+    
+    @GetMapping("/redis")
+    @CrossOrigin(origins = { "http://localhost:3000", "http://192.168.68.51:3030" }, allowCredentials = "true")
+    @ResponseBody
+    public Object getRedis( @RequestParam String field) {
+        logger.info("Requesting {}:{}", REDIS_KEY, field);
+        Object returnVal = redisTemplate.opsForHash().get(REDIS_KEY, field);
+        return returnVal;
     }
 
 }

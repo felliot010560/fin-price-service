@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.aleatory.common.events.StopCalculatedPriceData;
 import com.aleatory.common.events.StopCalculatedPricesEvent;
 import com.aleatory.common.messaging.impl.redis.RedisPubSubMessagingOperations;
+import com.aleatory.price.events.SPXCloseReceivedEvent;
 
 
 @Service
@@ -22,6 +23,7 @@ public class PriceServiceRedisMessaging extends RedisPubSubMessagingOperations {
 
     public PriceServiceRedisMessaging() {
         handlers.put("/topic/trading/prices.stop.calculated", (payload) -> fireStopCalculated(payload));
+        handlers.put("/topic/prices.spx.last-close", (payload) -> fireGotSPXClose(payload));
     }
 
     private void fireStopCalculated(Object payload) {
@@ -30,5 +32,10 @@ public class PriceServiceRedisMessaging extends RedisPubSubMessagingOperations {
         StopCalculatedPricesEvent event = new StopCalculatedPricesEvent(this, data);
         logger.info("Stopping calculated prices: {}, setting curr condor to trading condor: {}", data.isStop(), data.getTradingCondor());
         applicationEventPublisher.publishEvent(event);
+    }
+    
+    private void fireGotSPXClose(Object payload) {
+        Double close = (Double)payload;
+        applicationEventPublisher.publishEvent(new SPXCloseReceivedEvent(this, close));
     }
 }
