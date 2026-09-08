@@ -56,14 +56,6 @@ public class PricingController {
     public void restart() {
         IBPricingServiceApplication.restart(IBPricingServiceApplication.class);
     }
-    
-    @GetMapping("/redis")
-    @CrossOrigin(origins = { "http://localhost:3000", "http://192.168.68.51:3030" }, allowCredentials = "true")
-    @ResponseBody
-    public Object getRedis( @RequestParam String field) {
-        logger.info("Requesting {}:{}", REDIS_KEY, field);
-        Object returnVal = redisTemplate.opsForHash().get(REDIS_KEY, field);
-        return returnVal;
-    }
+
 
 }
